@@ -1,0 +1,7 @@
+{
+  "name": "Aviso Tasks",
+  "description": "Aviso YouTube task browser with zoom sidebar, task notifications, and background monitoring",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
