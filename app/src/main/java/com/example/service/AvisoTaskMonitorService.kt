@@ -252,7 +252,7 @@ class AvisoTaskMonitorService : Service() {
                 wakeLock?.release()
             }
         } catch (_: Exception) { }
-        stopForeground(STOP_FOREGROUND_REMOVE)
+        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
     }
 
     override fun onDestroy() {

@@ -126,6 +126,7 @@ object AvisoNotificationHelper {
         // Wake screen briefly so user sees the notification alert
         try {
             val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+            @Suppress("DEPRECATION")
             val wakeLock = powerManager?.newWakeLock(
                 PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
                 "Aviso:NotificationWakeLock"
