@@ -1,3 +1,11 @@
 <resources>
     <string name="app_name">Aviso Tasks</string>
+
+    <!-- Firebase SDK Configuration -->
+    <string name="google_app_id" translatable="false">1:705109167205:android:c26593fb10cd19729e8a8c</string>
+    <string name="google_api_key" translatable="false">AIzaSyBoAyv1vCXyWKCqaBPLR_KWPacnpppVCNM</string>
+    <string name="firebase_database_url" translatable="false">https://tasin-tournament-hub-1d925.firebaseio.com</string>
+    <string name="google_storage_bucket" translatable="false">tasin-tournament-hub-1d925.firebasestorage.app</string>
+    <string name="project_id" translatable="false">tasin-tournament-hub-1d925</string>
+    <string name="gcm_defaultSenderId" translatable="false">705109167205</string>
 </resources>
