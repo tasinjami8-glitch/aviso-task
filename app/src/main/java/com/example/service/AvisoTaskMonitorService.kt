@@ -64,22 +64,30 @@ class AvisoTaskMonitorService : Service() {
             private set
 
         fun start(context: Context, intervalMinutes: Int = 2) {
-            val intent = Intent(context, AvisoTaskMonitorService::class.java).apply {
-                action = ACTION_START
-                putExtra(EXTRA_INTERVAL_MIN, intervalMinutes)
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
+            try {
+                val intent = Intent(context, AvisoTaskMonitorService::class.java).apply {
+                    action = ACTION_START
+                    putExtra(EXTRA_INTERVAL_MIN, intervalMinutes)
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+            } catch (e: Exception) {
+                // Prevent crash if background start is restricted by Android OS
             }
         }
 
         fun stop(context: Context) {
-            val intent = Intent(context, AvisoTaskMonitorService::class.java).apply {
-                action = ACTION_STOP
+            try {
+                val intent = Intent(context, AvisoTaskMonitorService::class.java).apply {
+                    action = ACTION_STOP
+                }
+                context.startService(intent)
+            } catch (e: Exception) {
+                // Prevent crash if stopping service is not allowed
             }
-            context.startService(intent)
         }
     }
 

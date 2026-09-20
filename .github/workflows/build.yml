@@ -14,11 +14,10 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up JDK 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           java-version: '21'
           distribution: 'temurin'
-          cache: 'gradle'
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
@@ -35,12 +34,15 @@ jobs:
           echo "GEMINI_API_KEY=" > .env
           touch .env.example
           echo "GEMINI_API_KEY=" > .env.example
+          if [ -f debug.keystore.base64 ]; then
+            base64 -d debug.keystore.base64 > debug.keystore
+          fi
 
       - name: Build APK with Gradle Wrapper
         run: |
           ./gradlew :app:assembleDebug -x test -x lint --no-daemon --stacktrace
 
-      - name: Upload APK
+      - name: Verify and Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: app-debug
