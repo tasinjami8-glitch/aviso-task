@@ -19,11 +19,18 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
 
-      - name: Restore debug keystore
+      - name: Prepare build environment
         run: |
+          # 1. Restore debug.keystore if base64 file exists, or generate a standard one
           if [ -f debug.keystore.base64 ]; then
             base64 -d debug.keystore.base64 > debug.keystore
+          else
+            keytool -genkeypair -v -keystore debug.keystore -alias androiddebugkey -dname "CN=Android Debug,O=Android,C=US" -keypass android -storepass android -keyalg RSA -keysize 2048 -validity 10000
           fi
+          
+          # 2. Ensure .env file exists for Secrets Gradle Plugin
+          touch .env
+          echo "GEMINI_API_KEY=" >> .env
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -31,7 +38,7 @@ jobs:
           gradle-version: '9.1.0'
 
       - name: Build with Gradle
-        run: gradle assembleDebug --no-daemon --stacktrace
+        run: gradle :app:assembleDebug --no-daemon --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
