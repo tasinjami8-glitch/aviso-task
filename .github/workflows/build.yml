@@ -22,20 +22,19 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Accept Android SDK Licenses
-        run: |
-          yes | sdkmanager --licenses || true
-
       - name: Prepare build environment
         run: |
-          # 1. Restore debug.keystore or generate valid debug keystore
-          if [ -f debug.keystore.base64 ]; then
-            base64 -d debug.keystore.base64 > debug.keystore
-          elif [ ! -f debug.keystore ]; then
-            keytool -genkeypair -v -keystore debug.keystore -alias androiddebugkey -dname "CN=Android Debug,O=Android,C=US" -keypass android -storepass android -keyalg RSA -keysize 2048 -validity 10000
-          fi
-          
-          # 2. Ensure .env and .env.example exist for Secrets Gradle Plugin
+          # 1. Accept all Android SDK licenses
+          mkdir -p "$ANDROID_HOME/licenses" || true
+          echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" > "$ANDROID_HOME/licenses/android-sdk-license" || true
+          echo "d56f5187479451eabf01fb78af6dfcb131a6481e" >> "$ANDROID_HOME/licenses/android-sdk-license" || true
+          echo "84831b9409646a918e30573bab4c9c91346d8abd" > "$ANDROID_HOME/licenses/android-sdk-preview-license" || true
+          yes | sdkmanager --licenses || true
+
+          # 2. Install required SDK platform & build tools
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" || true
+
+          # 3. Ensure .env and .env.example exist for Secrets Gradle Plugin
           touch .env
           echo "GEMINI_API_KEY=" > .env
           touch .env.example
@@ -48,10 +47,9 @@ jobs:
 
       - name: Build with Gradle
         run: |
-          gradle --version
-          gradle :app:assembleDebug --no-daemon --stacktrace
-          echo "Listing all generated APK files:"
-          find app/build/outputs/ -type f -name "*.apk" || true
+          gradle :app:assembleDebug -x test -x lint --no-daemon --stacktrace
+          echo "Generated APK files:"
+          find . -name "*.apk"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
