@@ -10,7 +10,12 @@ import android.media.AudioAttributes
 import android.media.RingtoneManager
 import android.net.Uri
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.PowerManager
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.provider.Settings
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -341,6 +346,50 @@ object AvisoNotificationHelper {
                 ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
             val ringtone = RingtoneManager.getRingtone(context.applicationContext, soundUri)
             ringtone?.play()
+        } catch (_: Exception) { }
+    }
+
+    /**
+     * Plays loud alarm sound continuously for 5 seconds when Captcha is detected.
+     */
+    fun playCaptchaAlertSound(context: Context, durationMs: Long = 5000L) {
+        try {
+            val soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+                ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
+                ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+            val ringtone = RingtoneManager.getRingtone(context.applicationContext, soundUri)
+            ringtone?.play()
+
+            // Vibrate pattern for alert
+            try {
+                val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    val vibratorManager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
+                    vibratorManager?.defaultVibrator
+                } else {
+                    @Suppress("DEPRECATION")
+                    context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    vibrator?.vibrate(
+                        VibrationEffect.createWaveform(
+                            longArrayOf(0, 400, 200, 400, 200, 400, 200, 400, 200, 400),
+                            -1
+                        )
+                    )
+                } else {
+                    @Suppress("DEPRECATION")
+                    vibrator?.vibrate(durationMs)
+                }
+            } catch (_: Exception) {}
+
+            // Stop ringtone precisely after durationMs (5 seconds)
+            Handler(Looper.getMainLooper()).postDelayed({
+                try {
+                    if (ringtone?.isPlaying == true) {
+                        ringtone.stop()
+                    }
+                } catch (_: Exception) {}
+            }, durationMs)
         } catch (_: Exception) { }
     }
 

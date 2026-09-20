@@ -77,36 +77,37 @@ fun AvisoSidebar(
     Surface(
         modifier = modifier
             .fillMaxHeight()
-            .width(320.dp)
+            .width(330.dp)
             .testTag("right_sidebar_panel"),
         color = MaterialTheme.colorScheme.surface,
         tonalElevation = 8.dp,
-        shadowElevation = 16.dp,
-        shape = RoundedCornerShape(topStart = 16.dp, bottomStart = 16.dp)
+        shadowElevation = 20.dp,
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)),
+        shape = RoundedCornerShape(topStart = 20.dp, bottomStart = 20.dp)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxHeight()
-                .padding(vertical = 12.dp)
+                .padding(vertical = 14.dp)
         ) {
             // Top Bar with Cross Button
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
                         modifier = Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
+                            .size(38.dp)
+                            .clip(RoundedCornerShape(12.dp))
                             .background(MaterialTheme.colorScheme.primaryContainer),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = Icons.Default.ZoomIn,
+                            imageVector = Icons.Default.Settings,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.onPrimaryContainer,
                             modifier = Modifier.size(20.dp)
@@ -115,14 +116,15 @@ fun AvisoSidebar(
                     Spacer(modifier = Modifier.width(10.dp))
                     Column {
                         Text(
-                            text = "সাইডবার নিয়ন্ত্রণ",
+                            text = "Aviso Settings",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "সাইজ ও টাস্ক সেটিংস",
+                            text = "কন্ট্রোল ও কনফিগারেশন",
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.outline
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Medium
                         )
                     }
                 }
@@ -131,14 +133,16 @@ fun AvisoSidebar(
                 IconButton(
                     onClick = onClose,
                     modifier = Modifier
-                        .size(44.dp)
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                         .testTag("close_sidebar_cross_button")
                 ) {
                     Icon(
                         imageVector = Icons.Default.Close,
                         contentDescription = "বন্ধ করুন",
                         tint = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.size(26.dp)
+                        modifier = Modifier.size(22.dp)
                     )
                 }
             }

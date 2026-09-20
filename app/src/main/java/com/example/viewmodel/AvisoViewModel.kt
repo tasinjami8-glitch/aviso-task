@@ -29,7 +29,13 @@ data class AvisoUiState(
     val isNotifyOnTaskEndEnabled: Boolean = true,
     val errorMessage: String? = null,
     val reloadTrigger: Long = 0L,
-    val lastKnownTasksCount: Int = 0
+    val lastKnownTasksCount: Int = 0,
+    val isAutoWorkRunning: Boolean = false,
+    val autoWorkCountdownSeconds: Int = 0,
+    val autoWorkTotalSeconds: Int = 0,
+    val autoWorkStatus: String = "",
+    val autoWorkTaskTitle: String = "",
+    val captchaDetectedAlert: String? = null
 )
 
 class AvisoViewModel : ViewModel() {
@@ -188,5 +194,62 @@ class AvisoViewModel : ViewModel() {
         _uiState.update {
             it.copy(isBgServiceRunning = AvisoTaskMonitorService.isServiceRunning)
         }
+    }
+
+    fun startAutoWork() {
+        _uiState.update {
+            it.copy(
+                isAutoWorkRunning = true,
+                autoWorkCountdownSeconds = 0,
+                autoWorkTotalSeconds = 0,
+                autoWorkStatus = "অটো কাজ শুরু হচ্ছে...",
+                autoWorkTaskTitle = "",
+                captchaDetectedAlert = null
+            )
+        }
+    }
+
+    fun stopAutoWork(reason: String = "") {
+        _uiState.update {
+            it.copy(
+                isAutoWorkRunning = false,
+                autoWorkCountdownSeconds = 0,
+                autoWorkTotalSeconds = 0,
+                autoWorkStatus = if (reason.isNotEmpty()) reason else "অটো কাজ বন্ধ"
+            )
+        }
+    }
+
+    fun updateAutoWorkCountdown(remainingSec: Int, totalSec: Int) {
+        _uiState.update {
+            it.copy(
+                autoWorkCountdownSeconds = remainingSec,
+                autoWorkTotalSeconds = totalSec,
+                autoWorkStatus = if (remainingSec > 0) "ভিডিও চলছে: $remainingSec সেকেন্ড বাকি" else "ভিডিও দেখা শেষ!"
+            )
+        }
+    }
+
+    fun setAutoWorkStatus(status: String, taskTitle: String = "") {
+        _uiState.update {
+            it.copy(
+                autoWorkStatus = status,
+                autoWorkTaskTitle = if (taskTitle.isNotEmpty()) taskTitle else it.autoWorkTaskTitle
+            )
+        }
+    }
+
+    fun onCaptchaDetected(context: Context, reason: String) {
+        stopAutoWork("ক্যাপচা সনাক্ত: $reason")
+        _uiState.update {
+            it.copy(
+                captchaDetectedAlert = "⚠️ ক্যাপচা (Captcha) সনাক্ত হয়েছে! ৫ সেকেন্ড সাউন্ড বাজছে এবং অটো কাজ নিজে থেকেই বন্ধ করা হয়েছে। ক্যাপচা সমাধান করুন।"
+            )
+        }
+        AvisoNotificationHelper.playCaptchaAlertSound(context, 5000L)
+    }
+
+    fun dismissCaptchaAlert() {
+        _uiState.update { it.copy(captchaDetectedAlert = null) }
     }
 }
