@@ -14,10 +14,13 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up JDK 21
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v4
         with:
           java-version: '21'
           distribution: 'temurin'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
 
       - name: Accept Android SDK Licenses
         run: |
@@ -25,32 +28,29 @@ jobs:
 
       - name: Prepare build environment
         run: |
-          # 1. Restore debug.keystore if base64 file exists, or generate a standard one
+          # 1. Restore debug.keystore or generate valid debug keystore
           if [ -f debug.keystore.base64 ]; then
             base64 -d debug.keystore.base64 > debug.keystore
-          else
+          elif [ ! -f debug.keystore ]; then
             keytool -genkeypair -v -keystore debug.keystore -alias androiddebugkey -dname "CN=Android Debug,O=Android,C=US" -keypass android -storepass android -keyalg RSA -keysize 2048 -validity 10000
           fi
           
-          # 2. Ensure .env file exists for Secrets Gradle Plugin
+          # 2. Ensure .env and .env.example exist for Secrets Gradle Plugin
           touch .env
-          echo "GEMINI_API_KEY=" >> .env
+          echo "GEMINI_API_KEY=" > .env
+          touch .env.example
+          echo "GEMINI_API_KEY=" > .env.example
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '9.1.0'
-
-      - name: Generate Wrapper and Build
+      - name: Build with Gradle
         run: |
-          gradle wrapper --gradle-version 9.1.0
-          chmod +x gradlew
-          ./gradlew :app:assembleDebug --no-daemon --stacktrace
+          gradle :app:assembleDebug --no-daemon --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: app-debug
           path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
 
 
