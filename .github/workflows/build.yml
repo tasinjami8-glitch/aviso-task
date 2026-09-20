@@ -19,7 +19,20 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
 
-      - name: Prepare Android SDK & Accept Licenses
+      - name: Prepare environment variables & keystore
+        run: |
+          chmod +x gradlew || true
+          touch .env
+          echo "GEMINI_API_KEY=" > .env
+          touch .env.example
+          echo "GEMINI_API_KEY=" > .env.example
+          if [ -f debug.keystore.base64 ]; then
+            base64 -d debug.keystore.base64 > debug.keystore
+          elif [ ! -f debug.keystore ]; then
+            keytool -genkeypair -v -keystore debug.keystore -alias androiddebugkey -dname "CN=Android Debug,O=Android,C=US" -keypass android -storepass android -keyalg RSA -keysize 2048 -validity 10000
+          fi
+
+      - name: Accept Android SDK Licenses & Install SDK
         run: |
           mkdir -p "$ANDROID_HOME/licenses" || true
           echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" > "$ANDROID_HOME/licenses/android-sdk-license" || true
@@ -28,23 +41,18 @@ jobs:
           yes | sdkmanager --licenses || true
           sdkmanager "platforms;android-36" "build-tools;36.0.0" || true
 
-      - name: Prepare environment variables
-        run: |
-          touch .env
-          echo "GEMINI_API_KEY=" > .env
-          touch .env.example
-          echo "GEMINI_API_KEY=" > .env.example
-
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4.3.0
         with:
           gradle-version: '8.13'
+          cache-read-only: false
+          cache-overwrite-existing: true
 
       - name: Build with Gradle
         run: |
           gradle :app:assembleDebug -x test -x lint --no-daemon --stacktrace
-          echo "Generated APK files:"
-          find . -name "*.apk"
+          echo "Listing generated APK files:"
+          find app/build/outputs/apk/debug/ -type f -name "*.apk"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4.6.1
@@ -52,6 +60,7 @@ jobs:
           name: app-debug
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+
 
 
 
