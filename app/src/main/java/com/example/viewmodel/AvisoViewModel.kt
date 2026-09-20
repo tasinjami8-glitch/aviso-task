@@ -24,6 +24,9 @@ data class AvisoUiState(
     val scanResult: TaskScanResult = TaskScanResult(),
     val isBgServiceRunning: Boolean = false,
     val checkIntervalMinutes: Int = 2,
+    val isNotificationsEnabled: Boolean = true,
+    val isNotificationSoundEnabled: Boolean = true,
+    val isNotifyOnTaskEndEnabled: Boolean = true,
     val errorMessage: String? = null,
     val reloadTrigger: Long = 0L,
     val lastKnownTasksCount: Int = 0
@@ -33,6 +36,34 @@ class AvisoViewModel : ViewModel() {
 
     private val _uiState = MutableStateFlow(AvisoUiState())
     val uiState: StateFlow<AvisoUiState> = _uiState.asStateFlow()
+
+    fun loadNotificationPreferences(context: Context) {
+        _uiState.update {
+            it.copy(
+                isNotificationsEnabled = AvisoNotificationHelper.isNotificationsEnabled(context),
+                isNotificationSoundEnabled = AvisoNotificationHelper.isSoundEnabled(context),
+                isNotifyOnTaskEndEnabled = AvisoNotificationHelper.isNotifyTaskFinishEnabled(context)
+            )
+        }
+    }
+
+    fun toggleNotifications(context: Context) {
+        val newState = !_uiState.value.isNotificationsEnabled
+        AvisoNotificationHelper.setNotificationsEnabled(context, newState)
+        _uiState.update { it.copy(isNotificationsEnabled = newState) }
+    }
+
+    fun toggleNotificationSound(context: Context) {
+        val newState = !_uiState.value.isNotificationSoundEnabled
+        AvisoNotificationHelper.setSoundEnabled(context, newState)
+        _uiState.update { it.copy(isNotificationSoundEnabled = newState) }
+    }
+
+    fun toggleNotifyOnTaskEnd(context: Context) {
+        val newState = !_uiState.value.isNotifyOnTaskEndEnabled
+        AvisoNotificationHelper.setNotifyTaskFinishEnabled(context, newState)
+        _uiState.update { it.copy(isNotifyOnTaskEndEnabled = newState) }
+    }
 
     fun setZoom(percent: Int) {
         val clamped = percent.coerceIn(50, 250)
@@ -109,6 +140,12 @@ class AvisoViewModel : ViewModel() {
                     result.totalTasks,
                     details,
                     isNewDetected = true
+                )
+            } else if (previousCount > 0 && result.totalTasks == 0) {
+                // All tasks finished
+                AvisoNotificationHelper.sendNoTasksNotification(
+                    context,
+                    wasCompleted = true
                 )
             }
 

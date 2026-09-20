@@ -232,6 +232,19 @@ class AvisoTaskMonitorService : Service() {
                     }
                     lastKnownTaskCount = result.totalTasks
                 } else {
+                    if (lastKnownTaskCount > 0) {
+                        // All tasks completed / finished
+                        AvisoNotificationHelper.sendNoTasksNotification(
+                            this@AvisoTaskMonitorService,
+                            wasCompleted = true
+                        )
+                    } else if (lastKnownTaskCount == -1) {
+                        // First check and no tasks found
+                        AvisoNotificationHelper.sendNoTasksNotification(
+                            this@AvisoTaskMonitorService,
+                            wasCompleted = false
+                        )
+                    }
                     lastKnownTaskCount = 0
                 }
 

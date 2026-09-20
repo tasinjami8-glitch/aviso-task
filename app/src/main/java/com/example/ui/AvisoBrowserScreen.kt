@@ -108,9 +108,10 @@ fun AvisoBrowserScreen(
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
     var canGoBack by remember { mutableStateOf(false) }
 
-    // Synchronize service state on launch
+    // Synchronize service state and notification preferences on launch
     LaunchedEffect(Unit) {
         viewModel.syncServiceState()
+        viewModel.loadNotificationPreferences(context)
     }
 
     // Connect WebView to Android lifecycle to properly pause/resume audio & js threads

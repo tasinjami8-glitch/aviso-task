@@ -511,7 +511,140 @@ fun AvisoSidebar(
                             }
                         }
 
+                        Spacer(modifier = Modifier.height(12.dp))
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                         Spacer(modifier = Modifier.height(10.dp))
+
+                        // 1. Notification Master Switch (Notification On / Off)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Notifications,
+                                    contentDescription = null,
+                                    tint = if (uiState.isNotificationsEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column {
+                                    Text(
+                                        text = "নোটিফিকেশন",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        text = if (uiState.isNotificationsEnabled) "চালু আছে (নোটিফিকেশন পাবেন)" else "সম্পূর্ণ বন্ধ (কোনো নোটিফিকেশন আসবে না)",
+                                        fontSize = 10.sp,
+                                        color = if (uiState.isNotificationsEnabled) Color(0xFF2E7D32) else MaterialTheme.colorScheme.error
+                                    )
+                                }
+                            }
+                            Switch(
+                                checked = uiState.isNotificationsEnabled,
+                                onCheckedChange = { viewModel.toggleNotifications(context) },
+                                modifier = Modifier.testTag("notifications_master_switch")
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // 2. Notification Sound Switch (Sound On / Off)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.NotificationsActive,
+                                    contentDescription = null,
+                                    tint = if (uiState.isNotificationsEnabled && uiState.isNotificationSoundEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column {
+                                    Text(
+                                        text = "নোটিফিকেশন সাউন্ড",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        text = if (!uiState.isNotificationsEnabled) {
+                                            "নোটিফিকেশন বন্ধ"
+                                        } else if (uiState.isNotificationSoundEnabled) {
+                                            "সাউন্ড চালু (অ্যালার্ট রিংটোন বাজবে)"
+                                        } else {
+                                            "সাউন্ড বন্ধ (সাইলেন্ট নোটিফিকেশন)"
+                                        },
+                                        fontSize = 10.sp,
+                                        color = if (uiState.isNotificationsEnabled && uiState.isNotificationSoundEnabled) Color(0xFF2E7D32) else MaterialTheme.colorScheme.outline
+                                    )
+                                }
+                            }
+                            Switch(
+                                checked = uiState.isNotificationSoundEnabled,
+                                onCheckedChange = { viewModel.toggleNotificationSound(context) },
+                                enabled = uiState.isNotificationsEnabled,
+                                modifier = Modifier.testTag("notification_sound_switch")
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // 3. Notification on Task Finish / No Tasks Switch
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = null,
+                                    tint = if (uiState.isNotificationsEnabled && uiState.isNotifyOnTaskEndEnabled) Color(0xFF2E7D32) else MaterialTheme.colorScheme.outline,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column {
+                                    Text(
+                                        text = "কাজ শেষ হলে নোটিফিকেশন",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        text = if (!uiState.isNotificationsEnabled) {
+                                            "নোটিফিকেশন বন্ধ"
+                                        } else if (uiState.isNotifyOnTaskEndEnabled) {
+                                            "সব কাজ শেষ হলে বা কাজ না থাকলে নোটিফিকেশন দেবে"
+                                        } else {
+                                            "বন্ধ আছে"
+                                        },
+                                        fontSize = 10.sp,
+                                        color = if (uiState.isNotificationsEnabled && uiState.isNotifyOnTaskEndEnabled) Color(0xFF2E7D32) else MaterialTheme.colorScheme.outline
+                                    )
+                                }
+                            }
+                            Switch(
+                                checked = uiState.isNotifyOnTaskEndEnabled,
+                                onCheckedChange = { viewModel.toggleNotifyOnTaskEnd(context) },
+                                enabled = uiState.isNotificationsEnabled,
+                                modifier = Modifier.testTag("notify_on_task_end_switch")
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
 
                         // Test Notification Button
                         OutlinedButton(
