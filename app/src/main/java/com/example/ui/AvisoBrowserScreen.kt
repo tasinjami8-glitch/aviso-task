@@ -5,6 +5,8 @@ import android.graphics.Bitmap
 import android.net.http.SslError
 import android.os.Build
 import android.os.Message
+import android.os.SystemClock
+import android.view.MotionEvent
 import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
@@ -95,13 +97,38 @@ import com.example.viewmodel.AvisoViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 
+private var lastNativeTapTime = 0L
+
+private fun simulateTap(webView: WebView?, x: Float, y: Float) {
+    if (webView == null || x <= 0f || y <= 0f) return
+    val now = SystemClock.uptimeMillis()
+    if (now - lastNativeTapTime < 1500L) return
+    lastNativeTapTime = now
+    try {
+        val downTime = SystemClock.uptimeMillis()
+        val eventTime = SystemClock.uptimeMillis()
+        val down = MotionEvent.obtain(downTime, eventTime, MotionEvent.ACTION_DOWN, x, y, 0)
+        val up = MotionEvent.obtain(downTime, eventTime + 40, MotionEvent.ACTION_UP, x, y, 0)
+        webView.dispatchTouchEvent(down)
+        webView.dispatchTouchEvent(up)
+        down.recycle()
+        up.recycle()
+    } catch (e: Exception) {
+        // ignore tap errors
+    }
+}
+
 class AvisoBridge(
     private val onResult: (String) -> Unit,
     private val onCaptchaFound: (String) -> Unit = {},
     private val onTaskFound: (String, Int) -> Unit = { _, _ -> },
     private val onTaskStarted: (Int) -> Unit = {},
     private val onNoTasks: () -> Unit = {},
-    private val onConfirmClicked: (Boolean) -> Unit = {}
+    private val onConfirmClicked: (Boolean) -> Unit = {},
+    private val onVideoPositionFound: (Float, Float) -> Unit = { _, _ -> },
+    private val onRealTimerUpdate: (Int) -> Unit = {},
+    private val onTaskCompleted: () -> Unit = {},
+    private val onInterstitialHandled: (Int) -> Unit = {}
 ) {
     @JavascriptInterface
     fun onTasksScanned(json: String) {
@@ -131,6 +158,26 @@ class AvisoBridge(
     @JavascriptInterface
     fun onAutoWorkConfirmClicked(clicked: Boolean) {
         onConfirmClicked.invoke(clicked)
+    }
+
+    @JavascriptInterface
+    fun onVideoPositionFound(x: Float, y: Float) {
+        onVideoPositionFound.invoke(x, y)
+    }
+
+    @JavascriptInterface
+    fun onRealTimerUpdate(secondsLeft: Int) {
+        onRealTimerUpdate.invoke(secondsLeft)
+    }
+
+    @JavascriptInterface
+    fun onTaskCompleted() {
+        onTaskCompleted.invoke()
+    }
+
+    @JavascriptInterface
+    fun onInterstitialHandled(durationSec: Int) {
+        onInterstitialHandled.invoke(durationSec)
     }
 
     @JavascriptInterface
@@ -232,6 +279,34 @@ fun AvisoBrowserScreen(
 
     var autoWorkTaskStartedSignal by remember { mutableStateOf<Int?>(null) }
     var autoWorkNoTasksSignal by remember { mutableStateOf(false) }
+    var realTimerSecondsSignal by remember { mutableStateOf(-1) }
+    var taskCompletedSignal by remember { mutableStateOf(false) }
+    var realInterstitialDurationSignal by remember { mutableStateOf<Int?>(null) }
+    var manualWatchCountdown by remember { mutableStateOf<Int?>(null) }
+    var manualWatchTotal by remember { mutableStateOf<Int?>(null) }
+
+    // Manual watching countdown loop (when user clicks blue link manually and interstitial appears)
+    LaunchedEffect(manualWatchTotal) {
+        val total = manualWatchTotal ?: return@LaunchedEffect
+        if (uiState.isAutoWorkRunning) return@LaunchedEffect
+
+        var rem = total
+        while (rem > 0 && !uiState.isAutoWorkRunning) {
+            manualWatchCountdown = rem
+            // Ensure video playback is triggered and unmuted
+            webViewRef?.evaluateJavascript(AvisoTaskParser.JS_START_AND_WATCH_VIDEO, null)
+            delay(1000L)
+            rem--
+        }
+        manualWatchCountdown = 0
+        if (!uiState.isAutoWorkRunning) {
+            webViewRef?.evaluateJavascript(AvisoTaskParser.JS_AUTO_WORK_CLICK_CONFIRM, null)
+            Toast.makeText(context, "ভিডিও দেখা সম্পন্ন হয়েছে!", Toast.LENGTH_SHORT).show()
+        }
+        delay(2000L)
+        manualWatchTotal = null
+        manualWatchCountdown = null
+    }
 
     // Auto Work Execution Engine
     LaunchedEffect(uiState.isAutoWorkRunning) {
@@ -247,6 +322,9 @@ fun AvisoBrowserScreen(
         while (isActive && uiState.isAutoWorkRunning) {
             autoWorkTaskStartedSignal = null
             autoWorkNoTasksSignal = false
+            realTimerSecondsSignal = -1
+            taskCompletedSignal = false
+            realInterstitialDurationSignal = null
 
             // Step 1: Check Captcha
             viewModel.setAutoWorkStatus("ক্যাপচা চেক করা হচ্ছে...")
@@ -254,13 +332,13 @@ fun AvisoBrowserScreen(
             delay(500L)
             if (!uiState.isAutoWorkRunning) break
 
-            // Step 2: Find next video task & click blue link
-            viewModel.setAutoWorkStatus("ভিডিও সময় চেক ও লিংকে ক্লিক করা হচ্ছে...")
+            // Step 2: Find next video task & click task link
+            viewModel.setAutoWorkStatus("ভিডিও কাজ খোঁজা ও শুরু করা হচ্ছে...")
             webViewRef?.evaluateJavascript(AvisoTaskParser.JS_AUTO_WORK_FIND_AND_CLICK, null)
 
-            // Wait for JS to detect task and trigger start (up to 6 seconds)
+            // Wait for JS to detect task and trigger start (up to 7 seconds)
             var waited = 0
-            while (autoWorkTaskStartedSignal == null && !autoWorkNoTasksSignal && waited < 60 && uiState.isAutoWorkRunning) {
+            while (autoWorkTaskStartedSignal == null && !autoWorkNoTasksSignal && waited < 70 && uiState.isAutoWorkRunning) {
                 delay(100L)
                 waited++
             }
@@ -276,50 +354,65 @@ fun AvisoBrowserScreen(
                 break
             }
 
-            val duration = autoWorkTaskStartedSignal ?: 10
-            viewModel.setAutoWorkStatus("ভিডিও দেখা শুরু হয়েছে...")
+            var expectedDuration = (realInterstitialDurationSignal ?: autoWorkTaskStartedSignal ?: 10).coerceAtLeast(5)
+            viewModel.setAutoWorkStatus("ভিডিও লোড হচ্ছে...")
 
-            // Step 3: Countdown Timer matching the video duration
-            for (secLeft in duration downTo 1) {
-                if (!uiState.isAutoWorkRunning) break
-                viewModel.updateAutoWorkCountdown(secLeft, duration)
-                delay(1000L)
-                // Periodically check for captcha during countdown
-                webViewRef?.evaluateJavascript(AvisoTaskParser.JS_CHECK_CAPTCHA, null)
-            }
-
-            if (!uiState.isAutoWorkRunning) break
-            viewModel.updateAutoWorkCountdown(0, duration)
-
-            // Step 4: After countdown finishes, return to app Aviso task page
-            viewModel.setAutoWorkStatus("সময় শেষ! ব্যাকে আসা হচ্ছে...")
-            if (webViewRef?.canGoBack() == true) {
-                webViewRef?.goBack()
-                delay(1500L)
-            }
-            if (webViewRef?.url?.contains("tasks-youtube") != true) {
-                webViewRef?.loadUrl("https://aviso.bz/tasks-youtube")
-                delay(2000L)
-            }
-
-            if (!uiState.isAutoWorkRunning) break
-
-            // Step 5: Click confirm view ("Подтвердить просмотр")
-            viewModel.setAutoWorkStatus("কনফার্ম ভিউ (Подтвердить просмотр) ক্লিক করা হচ্ছে...")
-            webViewRef?.evaluateJavascript(AvisoTaskParser.JS_AUTO_WORK_CLICK_CONFIRM, null)
-
-            // Step 6: Wait 2 seconds
-            viewModel.setAutoWorkStatus("২ সেকেন্ড অপেক্ষা করা হচ্ছে...")
+            // Allow video player / page to load
             delay(2000L)
 
+            // Step 3: Active Video Watching & Verification Loop
+            // Repeatedly triggers playback, un-mutes, simulates native touch on YouTube play button,
+            // and tracks Aviso's real on-screen timer.
+            val maxWaitSeconds = { (realInterstitialDurationSignal ?: expectedDuration) + 25 }
+            var elapsedSec = 0
+
+            while (elapsedSec < maxWaitSeconds() && uiState.isAutoWorkRunning && !taskCompletedSignal) {
+                // If interstitial duration was detected (e.g. 90 seconds), dynamically adapt expectedDuration
+                if (realInterstitialDurationSignal != null && realInterstitialDurationSignal!! > expectedDuration) {
+                    expectedDuration = realInterstitialDurationSignal!!
+                }
+
+                // Execute active watcher to trigger playback, unmute, native tap and read real timer
+                webViewRef?.evaluateJavascript(AvisoTaskParser.JS_START_AND_WATCH_VIDEO, null)
+                delay(1000L)
+                elapsedSec++
+
+                // Update countdown display with real timer if available, otherwise countdown fallback
+                val currentRemaining = if (realTimerSecondsSignal > 0) {
+                    realTimerSecondsSignal
+                } else {
+                    (expectedDuration - elapsedSec).coerceAtLeast(0)
+                }
+                viewModel.updateAutoWorkCountdown(currentRemaining, expectedDuration)
+
+                // If real timer reached 0 or confirm was triggered
+                if (realTimerSecondsSignal == 0 || taskCompletedSignal) {
+                    webViewRef?.evaluateJavascript(AvisoTaskParser.JS_AUTO_WORK_CLICK_CONFIRM, null)
+                    delay(1500L)
+                    break
+                }
+            }
+
             if (!uiState.isAutoWorkRunning) break
+            viewModel.updateAutoWorkCountdown(0, expectedDuration)
 
-            // Step 7: Refresh page once
-            viewModel.setAutoWorkStatus("পেজ রিফ্রেশ করা হচ্ছে...")
-            webViewRef?.reload()
-            delay(3500L)
+            // Step 4: Final Confirm View Click check
+            viewModel.setAutoWorkStatus("ভিউ নিশ্চিতকরণ চেক করা হচ্ছে...")
+            webViewRef?.evaluateJavascript(AvisoTaskParser.JS_AUTO_WORK_CLICK_CONFIRM, null)
+            delay(1500L)
 
-            // Loop continues automatically until all tasks are finished!
+            // Step 5: Return to tasks-youtube page
+            viewModel.setAutoWorkStatus("ভিডিও দেখা সফল! পরবর্তী কাজে যাওয়া হচ্ছে...")
+            if (webViewRef?.url?.contains("tasks-youtube") != true) {
+                webViewRef?.loadUrl("https://aviso.bz/tasks-youtube")
+                delay(3000L)
+            } else {
+                webViewRef?.reload()
+                delay(3000L)
+            }
+
+            // Step 6: Brief interval before scanning next task
+            delay(1000L)
         }
     }
 
@@ -571,13 +664,13 @@ fun AvisoBrowserScreen(
                             allowFileAccess = true
                             allowContentAccess = true
                             javaScriptCanOpenWindowsAutomatically = true
-                            setSupportMultipleWindows(true)
+                            setSupportMultipleWindows(false)
                             mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                             cacheMode = WebSettings.LOAD_DEFAULT
                             userAgentString = "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36"
                             textZoom = uiState.zoomPercent
-                            // Prevent background web audio from underflowing AudioTrack buffer without user interaction
-                            mediaPlaybackRequiresUserGesture = true
+                            // Allow video playback to start without requiring manual physical user gesture
+                            mediaPlaybackRequiresUserGesture = false
                         }
 
                         // Register Bridge for Full Site Task Detection & Auto Work
@@ -614,6 +707,34 @@ fun AvisoBrowserScreen(
                                             viewModel.setAutoWorkStatus("Подтвердить просмотр সফল হয়েছে")
                                         }
                                     }
+                                },
+                                onVideoPositionFound = { x, y ->
+                                    post {
+                                        simulateTap(this, x, y)
+                                    }
+                                },
+                                onRealTimerUpdate = { secondsLeft ->
+                                    post {
+                                        realTimerSecondsSignal = secondsLeft
+                                    }
+                                },
+                                onTaskCompleted = {
+                                    post {
+                                        taskCompletedSignal = true
+                                    }
+                                },
+                                onInterstitialHandled = { durationSec ->
+                                    post {
+                                        realInterstitialDurationSignal = durationSec
+                                        if (uiState.isAutoWorkRunning) {
+                                            autoWorkTaskStartedSignal = durationSec
+                                            viewModel.setAutoWorkStatus("Start Watching সফল! $durationSec সেক...")
+                                        } else {
+                                            manualWatchTotal = durationSec
+                                            manualWatchCountdown = durationSec
+                                            Toast.makeText(ctx, "Start Watching ক্লিক হয়েছে! $durationSec সেকেন্ড দেখা হচ্ছে...", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
                                 }
                             ),
                             "AvisoBridge"
@@ -642,6 +763,14 @@ fun AvisoBrowserScreen(
                         }
 
                         webViewClient = object : WebViewClient() {
+                            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                                val url = request?.url?.toString() ?: return false
+                                if (url.startsWith("http://") || url.startsWith("https://")) {
+                                    return false // Load inside this WebView
+                                }
+                                return true
+                            }
+
                             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                                 canGoBack = view?.canGoBack() == true
                                 viewModel.setErrorMessage(null)
@@ -651,9 +780,18 @@ fun AvisoBrowserScreen(
                                 canGoBack = view?.canGoBack() == true
                                 CookieManager.getInstance().flush()
 
+                                // Override window.open and blank links to keep all tasks inside this WebView
+                                view?.evaluateJavascript(AvisoTaskParser.JS_SETUP_OVERRIDE, null)
+
                                 // Apply user zoom scale
                                 val zoomScale = uiState.zoomPercent / 100f
                                 view?.evaluateJavascript("document.body.style.zoom = '$zoomScale';", null)
+
+                                // Check and handle "Start Watching" interstitial screen if present
+                                view?.evaluateJavascript(AvisoTaskParser.JS_CHECK_AND_HANDLE_INTERSTITIAL, null)
+                                view?.postDelayed({
+                                    view.evaluateJavascript(AvisoTaskParser.JS_CHECK_AND_HANDLE_INTERSTITIAL, null)
+                                }, 700L)
 
                                 // Inject task reader script
                                 view?.evaluateJavascript(AvisoTaskParser.JS_READER_CODE, null)
@@ -920,6 +1058,81 @@ fun AvisoBrowserScreen(
                                         .height(5.dp)
                                         .clip(RoundedCornerShape(3.dp)),
                                     color = MaterialTheme.colorScheme.primary,
+                                    trackColor = MaterialTheme.colorScheme.surfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Live Countdown HUD for Manual Click Mode (when user clicks blue link manually)
+            if (!uiState.isAutoWorkRunning && manualWatchCountdown != null && manualWatchCountdown!! > 0) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 20.dp, start = 16.dp, end = 16.dp)
+                ) {
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("manual_watch_countdown_hud"),
+                        shape = RoundedCornerShape(24.dp),
+                        color = MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(1.5.dp, Color(0xFF2563EB).copy(alpha = 0.6f)),
+                        shadowElevation = 16.dp
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier.size(50.dp)
+                                ) {
+                                    val total = (manualWatchTotal ?: 10).coerceAtLeast(1)
+                                    val progress = (manualWatchCountdown!!.toFloat() / total).coerceIn(0f, 1f)
+                                    CircularProgressIndicator(
+                                        progress = { progress },
+                                        modifier = Modifier.size(50.dp),
+                                        color = Color(0xFF2563EB),
+                                        trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                                        strokeWidth = 4.5.dp
+                                    )
+                                    Text(
+                                        text = "${manualWatchCountdown}s",
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        fontSize = 14.sp
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(14.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Start Watching সক্রিয়",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 14.sp,
+                                        color = Color(0xFF2563EB)
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = "ভিডিও চলছে: $manualWatchCountdown সেকেন্ড বাকি (মোট ${manualWatchTotal}s)",
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+
+                            if (manualWatchTotal != null && manualWatchTotal!! > 0) {
+                                Spacer(modifier = Modifier.height(10.dp))
+                                LinearProgressIndicator(
+                                    progress = { (manualWatchCountdown!!.toFloat() / manualWatchTotal!!).coerceIn(0f, 1f) },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(5.dp)
+                                        .clip(RoundedCornerShape(3.dp)),
+                                    color = Color(0xFF2563EB),
                                     trackColor = MaterialTheme.colorScheme.surfaceVariant
                                 )
                             }
