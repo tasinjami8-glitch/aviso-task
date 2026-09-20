@@ -6,9 +6,6 @@ on:
       - main
   workflow_dispatch:
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
-
 jobs:
   build:
     runs-on: ubuntu-24.04
@@ -31,9 +28,7 @@ jobs:
         run: |
           chmod +x gradlew
           touch .env
-          echo "GEMINI_API_KEY=" > .env
           touch .env.example
-          echo "GEMINI_API_KEY=" > .env.example
           if [ -f debug.keystore.base64 ]; then
             base64 -d debug.keystore.base64 > debug.keystore
           fi
