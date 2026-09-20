@@ -45,11 +45,12 @@ jobs:
         uses: gradle/actions/setup-gradle@v4.3.0
         with:
           gradle-version: '8.13'
-          cache-read-only: false
-          cache-overwrite-existing: true
+          cache-disabled: true
 
       - name: Build with Gradle
         run: |
+          gradle wrapper --gradle-version 8.13 || true
+          chmod +x gradlew || true
           gradle :app:assembleDebug -x test -x lint --no-daemon --stacktrace
           echo "Listing generated APK files:"
           find app/build/outputs/apk/debug/ -type f -name "*.apk"
