@@ -108,30 +108,23 @@ object AvisoTaskParser {
     """
 
     /**
-     * Checks if any captcha is visible or text present.
+     * Checks if a genuine, blocking captcha widget is visible on screen.
+     * Note: Avoids loose substring matching on document.body to prevent false positives from task titles (e.g. "Без капчи").
      */
     const val JS_CHECK_CAPTCHA = """
         (function() {
             try {
-                var bodyText = (document.body ? document.body.innerText : '') || '';
-                var textLower = bodyText.toLowerCase();
-                var captchaPhrases = ['капч', 'captcha', 'recaptcha', 'hcaptcha', 'я не робот', 'пройдите проверку', 'неверная капча', 'введите код', 'выберите картинку'];
-                for (var i = 0; i < captchaPhrases.length; i++) {
-                    if (textLower.indexOf(captchaPhrases[i]) !== -1) {
-                        if (window.AvisoBridge && window.AvisoBridge.onCaptchaFound) {
-                            window.AvisoBridge.onCaptchaFound('ক্যাপচা লেখা সনাক্ত: ' + captchaPhrases[i]);
-                        }
-                        return;
-                    }
-                }
                 var selectors = [
-                    'iframe[src*="recaptcha"]', 'iframe[src*="hcaptcha"]', 'iframe[src*="turnstile"]',
-                    'iframe[src*="challenges.cloudflare"]', '.g-recaptcha', '.h-captcha', '#captcha',
-                    '[name="captcha"]', '.captcha-block', '.captcha_wrap'
+                    'iframe[src*="recaptcha/api2/bframe"]',
+                    'iframe[src*="hcaptcha.com/checkbox"]',
+                    'iframe[src*="challenges.cloudflare"]',
+                    '#captcha_block:not([style*="none"])',
+                    '#modal_captcha:not([style*="none"])',
+                    '.g-recaptcha[data-sitekey]:not([style*="none"])'
                 ];
                 for (var j = 0; j < selectors.length; j++) {
                     var el = document.querySelector(selectors[j]);
-                    if (el && el.offsetParent !== null) {
+                    if (el && el.offsetParent !== null && (el.offsetWidth > 30 || el.offsetHeight > 30)) {
                         if (window.AvisoBridge && window.AvisoBridge.onCaptchaFound) {
                             window.AvisoBridge.onCaptchaFound('ক্যাপচা উইজেট সনাক্ত');
                         }
@@ -143,20 +136,97 @@ object AvisoTaskParser {
     """
 
     /**
-     * Overrides window.open and target="_blank" so all popups and video tasks stay in the same WebView.
+     * Injected immediately into every page.
+     * Keeps Aviso session navigation internal while routing YouTube video links directly to the YouTube app.
      */
     const val JS_SETUP_OVERRIDE = """
         (function() {
             try {
-                window.open = function(url) {
-                    if (url) {
+                // Route YouTube URLs directly to YouTube app, or same-window for internal Aviso viewers
+                window.open = function(url, target, features) {
+                    if (url && (url.indexOf('youtube.com') !== -1 || url.indexOf('youtu.be') !== -1 || url.indexOf('vnd.youtube') !== -1)) {
+                        if (window.AvisoBridge && window.AvisoBridge.openInYouTubeApp) {
+                            window.AvisoBridge.openInYouTubeApp(url);
+                            return window;
+                        }
+                    }
+                    if (url && url !== 'about:blank' && url.indexOf('javascript:') === -1) {
                         window.location.href = url;
                     }
-                    return window;
+                    return {
+                        closed: false,
+                        close: function() {},
+                        focus: function() {},
+                        location: {
+                            set href(val) {
+                                if (val && (val.indexOf('youtube.com') !== -1 || val.indexOf('youtu.be') !== -1 || val.indexOf('vnd.youtube') !== -1)) {
+                                    if (window.AvisoBridge && window.AvisoBridge.openInYouTubeApp) {
+                                        window.AvisoBridge.openInYouTubeApp(val);
+                                        return;
+                                    }
+                                }
+                                if (val && val !== 'about:blank' && val.indexOf('javascript:') === -1) {
+                                    window.location.href = val;
+                                }
+                            },
+                            get href() {
+                                return window.location.href;
+                            },
+                            replace: function(val) {
+                                if (val && val !== 'about:blank') {
+                                    window.location.replace(val);
+                                }
+                            },
+                            assign: function(val) {
+                                if (val && val !== 'about:blank') {
+                                    window.location.assign(val);
+                                }
+                            }
+                        },
+                        document: {
+                            write: function() {},
+                            close: function() {}
+                        }
+                    };
                 };
-                var blankLinks = document.querySelectorAll('a[target="_blank"]');
-                for (var i = 0; i < blankLinks.length; i++) {
-                    blankLinks[i].target = '_self';
+
+                // Capture clicks on document: if YouTube link, open in YouTube app!
+                document.addEventListener('click', function(e) {
+                    var el = e.target;
+                    var a = (el && el.tagName === 'A') ? el : (el && el.closest ? el.closest('a') : null);
+                    if (a) {
+                        var href = (a.getAttribute('href') || '').toLowerCase();
+                        if (href.indexOf('youtube.com') !== -1 || href.indexOf('youtu.be') !== -1 || href.indexOf('vnd.youtube') !== -1) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            if (window.AvisoBridge && window.AvisoBridge.openInYouTubeApp) {
+                                window.AvisoBridge.openInYouTubeApp(a.href || href);
+                            }
+                            return;
+                        }
+                        a.removeAttribute('target');
+                        a.setAttribute('target', '_self');
+                    }
+                }, true);
+
+                function enforceSelfTarget() {
+                    var blankLinks = document.querySelectorAll('a[target="_blank"], a[target="_new"], a[target]');
+                    for (var i = 0; i < blankLinks.length; i++) {
+                        var h = (blankLinks[i].getAttribute('href') || '').toLowerCase();
+                        if (h.indexOf('youtube.com') === -1 && h.indexOf('youtu.be') === -1) {
+                            blankLinks[i].target = '_self';
+                            blankLinks[i].removeAttribute('target');
+                        }
+                    }
+                }
+
+                enforceSelfTarget();
+
+                if (window.MutationObserver) {
+                    var observer = new MutationObserver(function() {
+                        enforceSelfTarget();
+                    });
+                    observer.observe(document.documentElement || document.body, { childList: true, subtree: true });
                 }
             } catch(e) {}
         })();
@@ -164,49 +234,132 @@ object AvisoTaskParser {
 
     /**
      * Finds the next uncompleted YouTube task:
-     * - Reads duration (e.g. 5 сек, 10 сек, 90 сек).
-     * - Clicks the blue task link.
-     * - If "Приступить к выполнению" appears, clicks it.
+     * - Clicks the blue task title or row link.
+     * - Detects and clicks "Приступить к просмотру" (Start watching) button.
      * - Reports duration and title to Kotlin bridge.
      */
     const val JS_AUTO_WORK_FIND_AND_CLICK = """
         (function() {
             try {
-                // 1. Override window.open & link targets
+                // 1. Enforce same-window navigation
                 window.open = function(url) {
-                    if (url) {
+                    if (url && url !== 'about:blank' && url.indexOf('javascript:') === -1) {
                         window.location.href = url;
                     }
                     return window;
                 };
-                var blankLinks = document.querySelectorAll('a[target="_blank"]');
+                var blankLinks = document.querySelectorAll('a[target="_blank"], a[target="_new"], a[target]');
                 for (var b = 0; b < blankLinks.length; b++) {
                     blankLinks[b].target = '_self';
+                    blankLinks[b].removeAttribute('target');
                 }
 
-                // 2. Captcha Check First
+                // Clean, reliable click helper
+                function safeClick(el) {
+                    if (!el) return false;
+                    try { el.scrollIntoView({ behavior: 'instant', block: 'center' }); } catch(e) {}
+                    var aTag = (el.tagName === 'A') ? el : (el.closest ? el.closest('a') : null);
+
+                    var href = (aTag ? aTag.getAttribute('href') : null) || el.getAttribute('href');
+                    if (href && (href.indexOf('youtube.com') !== -1 || href.indexOf('youtu.be') !== -1 || href.indexOf('vnd.youtube') !== -1)) {
+                        if (window.AvisoBridge && window.AvisoBridge.openInYouTubeApp) {
+                            window.AvisoBridge.openInYouTubeApp((aTag ? aTag.href : null) || href);
+                            return true;
+                        }
+                    }
+
+                    if (aTag) {
+                        aTag.removeAttribute('target');
+                        aTag.setAttribute('target', '_self');
+                    }
+                    try { el.focus(); } catch(e) {}
+                    
+                    try {
+                        var rect = el.getBoundingClientRect();
+                        var cx = rect.left + rect.width / 2;
+                        var cy = rect.top + rect.height / 2;
+                        var mdown = new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy });
+                        var mup = new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy });
+                        var mclick = new MouseEvent('click', { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy });
+                        el.dispatchEvent(mdown);
+                        el.dispatchEvent(mup);
+                        el.dispatchEvent(mclick);
+                    } catch(e) {}
+
+                    try { el.click(); } catch(e) {}
+                    if (aTag && aTag !== el) {
+                        try { aTag.click(); } catch(e) {}
+                    }
+
+                    if (el.getAttribute && el.getAttribute('onclick')) {
+                        try {
+                            var fn = new Function(el.getAttribute('onclick'));
+                            fn.call(el);
+                        } catch(e) {}
+                    }
+
+                    if (href && href !== '#' && href.indexOf('javascript:') === -1 &&
+                        (href.indexOf('/vl') !== -1 || href.indexOf('/go/') !== -1 || href.indexOf('create_session') !== -1)) {
+                        setTimeout(function() {
+                            window.location.href = (aTag ? aTag.href : null) || href;
+                        }, 120);
+                    }
+                    return true;
+                }
+
+                function isStartWatchingBtn(el) {
+                    if (!el || el.offsetParent === null) return false;
+                    var t = (el.innerText || el.value || '').toLowerCase().trim();
+                    var cls = (el.className || '').toString().toLowerCase();
+                    var oc = (el.getAttribute('onclick') || '').toLowerCase();
+                    var href = (el.getAttribute('href') || '').toLowerCase();
+
+                    if (!t && !cls && !oc && !href) return false;
+                    if (t === 'посмотреть видео' || t === 'инструкция' || t.indexOf('жалоб') !== -1 || href.indexOf('delete') !== -1) {
+                        return false;
+                    }
+
+                    if (t.indexOf('приступить к просмотру') !== -1 ||
+                        t.indexOf('приступить к выполнению') !== -1 ||
+                        t.indexOf('начать просмотр') !== -1 ||
+                        t.indexOf('start watching') !== -1 ||
+                        t.indexOf('start view') !== -1 ||
+                        t.indexOf('start execution') !== -1) {
+                        return true;
+                    }
+
+                    if (cls.indexOf('btn_play') !== -1 || cls.indexOf('btn-play') !== -1 || cls.indexOf('btn_youtube') !== -1 ||
+                        oc.indexOf('start_youtube') !== -1 || oc.indexOf('func_start') !== -1 ||
+                        href.indexOf('create_session') !== -1 || href.indexOf('/vl/') !== -1) {
+                        return true;
+                    }
+
+                    return false;
+                }
+
+                function extractDuration(text) {
+                    var t = text || '';
+                    var mMS = t.match(/(\d+)\s*(?:minute|min|минут)[s]?\s*(?:and\s*)?(\d+)\s*(?:second|sec|секунд)[s]?/i);
+                    if (mMS) return (parseInt(mMS[1], 10) || 0) * 60 + (parseInt(mMS[2], 10) || 0);
+                    var mM = t.match(/(\d+)\s*(?:minute|min|минут)[s]?/i);
+                    if (mM) return (parseInt(mM[1], 10) || 0) * 60;
+                    var mS = t.match(/(\d+)\s*(?:сек|sec|секунд)/i);
+                    if (mS) return parseInt(mS[1], 10) || 10;
+                    return 10;
+                }
+
+                // 2. Check if a genuine visible captcha block exists
+                var realCaptcha = document.querySelector('iframe[src*="recaptcha/api2/bframe"], iframe[src*="challenges.cloudflare"], #captcha_block, .modal-captcha');
+                if (realCaptcha && realCaptcha.offsetParent !== null && realCaptcha.offsetWidth > 30) {
+                    if (window.AvisoBridge && window.AvisoBridge.onCaptchaFound) {
+                        window.AvisoBridge.onCaptchaFound('ক্যাপচা সমাধান প্রয়োজন');
+                    }
+                    return;
+                }
+
+                // 3. Check if current page is already the "Start Watching" Interstitial Screen
                 var bodyText = (document.body ? document.body.innerText : '') || '';
                 var textLower = bodyText.toLowerCase();
-                var captchaPhrases = ['капч', 'captcha', 'recaptcha', 'hcaptcha', 'я не робот', 'пройдите проверку', 'неверная капча'];
-                for (var c = 0; c < captchaPhrases.length; c++) {
-                    if (textLower.indexOf(captchaPhrases[c]) !== -1) {
-                        if (window.AvisoBridge && window.AvisoBridge.onCaptchaFound) {
-                            window.AvisoBridge.onCaptchaFound('ক্যাপচা সনাক্ত');
-                        }
-                        return;
-                    }
-                }
-                var captchaEls = document.querySelectorAll('iframe[src*="recaptcha"], iframe[src*="hcaptcha"], iframe[src*="turnstile"], .g-recaptcha, .h-captcha, #captcha');
-                for (var ce = 0; ce < captchaEls.length; ce++) {
-                    if (captchaEls[ce].offsetParent !== null) {
-                        if (window.AvisoBridge && window.AvisoBridge.onCaptchaFound) {
-                            window.AvisoBridge.onCaptchaFound('ক্যাপচা উইজেট সনাক্ত');
-                        }
-                        return;
-                    }
-                }
-
-                // 2b. Check if current page is already the "Start Watching" Interstitial Screen
                 var isDirectInterstitial = (
                     textLower.indexOf('to count your view') !== -1 ||
                     textLower.indexOf('please watch the video for at least') !== -1 ||
@@ -215,27 +368,12 @@ object AvisoTaskParser {
                     textLower.indexOf('начать просмотр') !== -1
                 );
                 if (isDirectInterstitial) {
-                    var interSec = 0;
-                    var mMS = textLower.match(/(\d+)\s*(?:minute|min|минут)[s]?\s*(?:and\s*)?(\d+)\s*(?:second|sec|секунд)[s]?/i);
-                    if (mMS) {
-                        interSec = (parseInt(mMS[1], 10) || 0) * 60 + (parseInt(mMS[2], 10) || 0);
-                    }
-                    if (interSec === 0) {
-                        var mM = textLower.match(/(\d+)\s*(?:minute|min|минут)[s]?/i);
-                        if (mM) interSec = (parseInt(mM[1], 10) || 0) * 60;
-                    }
-                    if (interSec === 0) {
-                        var mS = textLower.match(/(\d+)\s*(?:second|sec|секунд)[s]?/i);
-                        if (mS) interSec = parseInt(mS[1], 10) || 0;
-                    }
-                    if (interSec <= 0) interSec = 40;
-
+                    var interSec = extractDuration(textLower);
                     var interBtns = document.querySelectorAll('button, a, input[type="button"], div[role="button"], span[role="button"], div, span');
                     for (var ib = 0; ib < interBtns.length; ib++) {
                         var ibTxt = (interBtns[ib].innerText || interBtns[ib].value || '').trim().toLowerCase();
-                        if (ibTxt === 'start watching' || ibTxt.indexOf('start watching') !== -1 || ibTxt === 'начать просмотр') {
-                            try { interBtns[ib].click(); } catch(e) {}
-                            try { interBtns[ib].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window })); } catch(e) {}
+                        if (ibTxt === 'start watching' || ibTxt.indexOf('start watching') !== -1 || ibTxt === 'начать просмотр' || ibTxt.indexOf('приступить к просмотру') !== -1) {
+                            safeClick(interBtns[ib]);
                             if (window.AvisoBridge && window.AvisoBridge.onInterstitialHandled) {
                                 window.AvisoBridge.onInterstitialHandled(interSec);
                             }
@@ -247,17 +385,35 @@ object AvisoTaskParser {
                     }
                 }
 
-                // 3. Locate task rows
-                var rows = document.querySelectorAll('tr[id^="task_"], div[id^="task_"], .work-serf, [data-task-id], tr.table-task');
-                if (rows.length === 0) {
-                    rows = document.querySelectorAll('.table tr, .tasks-list > div, .content-task, tbody tr');
+                // 4. Check if ANY "Приступить к просмотру" button is ALREADY visible on the page right now
+                var allClickables = document.querySelectorAll('button, a, input[type="button"], span, div');
+                var globalStartBtn = null;
+                var globalStartRow = null;
+                for (var a = 0; a < allClickables.length; a++) {
+                    var btnEl = allClickables[a];
+                    if (isStartWatchingBtn(btnEl)) {
+                        globalStartBtn = btnEl;
+                        globalStartRow = btnEl.closest('tr, div.work-serf, table.work-serf, div[id^="adv_"], div[id^="bl_"], tr[id^="adv_"]') || btnEl.parentElement;
+                        break;
+                    }
                 }
+                if (globalStartBtn) {
+                    var gDur = extractDuration(globalStartRow ? globalStartRow.innerText : '');
+                    safeClick(globalStartBtn);
+                    if (window.AvisoBridge && window.AvisoBridge.onAutoWorkTaskStarted) {
+                        window.AvisoBridge.onAutoWorkTaskStarted(gDur);
+                    }
+                    return;
+                }
+
+                // 5. Locate next uncompleted task row
+                var rows = document.querySelectorAll('tr[id^="adv_"], div[id^="adv_"], table[id^="adv_"], tr[id^="task_"], div[id^="task_"], tr[id^="bl_"], div[id^="bl_"], .work-serf, .work-youtube, [data-task-id], tr.table-task, tbody tr, tr');
 
                 var foundRow = null;
                 var durationSec = 10;
                 var taskTitle = '';
-                var blueLink = null;
-                var startBtn = null;
+                var targetLink = null;
+                var startBtnAlreadyVisible = null;
 
                 for (var i = 0; i < rows.length; i++) {
                     var row = rows[i];
@@ -267,54 +423,58 @@ object AvisoTaskParser {
                         continue;
                     }
 
-                    if (row.style.display === 'none' || row.classList.contains('task-done') || row.classList.contains('completed')) {
+                    if (row.style.display === 'none' || row.classList.contains('task-done') || row.classList.contains('completed') || rText.indexOf('Задание выполнено') !== -1 || rText.indexOf('выполнено') !== -1) {
                         continue;
                     }
 
-                    // Extract seconds (e.g. 5 сек, 10 сек, 90 сек)
-                    var secMatch = rText.match(/(\d+)\s*(?:сек|sec)/i);
-                    var sec = 10;
-                    if (secMatch) {
-                        sec = parseInt(secMatch[1], 10) || 10;
-                    }
+                    var sec = extractDuration(rText);
 
-                    // Check if row already has "Приступить к выполнению" or "Подтвердить просмотр"
-                    var allEls = row.querySelectorAll('*');
-                    var existingBtn = null;
-                    for (var k = 0; k < allEls.length; k++) {
-                        var elT = (allEls[k].innerText || allEls[k].value || '').trim();
-                        if (elT.indexOf('Приступить к выполнению') !== -1 || elT.indexOf('Подтвердить просмотр') !== -1 || elT.indexOf('Начать') !== -1) {
-                            existingBtn = allEls[k];
+                    // Check if row ALREADY has "Приступить к просмотру" visible
+                    var rowEls = row.querySelectorAll('button, a, input[type="button"], span, div');
+                    for (var re = 0; re < rowEls.length; re++) {
+                        if (isStartWatchingBtn(rowEls[re])) {
+                            startBtnAlreadyVisible = rowEls[re];
                             break;
                         }
                     }
 
-                    // Look for the blue task link in row
-                    var links = row.querySelectorAll('a, span[onclick*="start"], div[onclick*="start"]');
+                    // Look for the clickable task title in row
+                    // (Strictly avoid advertiser user profiles, instructions, complaints, delete)
+                    var links = row.querySelectorAll('a, span[onclick], div[onclick], .title, .task-title, .work-title, a.serf-url');
                     var candidateLink = null;
                     for (var l = 0; l < links.length; l++) {
                         var lt = (links[l].innerText || '').trim();
-                        var href = links[l].getAttribute('href') || '';
-                        if (lt === 'Инструкция' || lt.indexOf('жалоб') !== -1 || href.indexOf('delete') !== -1) {
+                        var href = (links[l].getAttribute('href') || '').toLowerCase();
+                        var oc = (links[l].getAttribute('onclick') || '').toLowerCase();
+                        var cls = (links[l].className || '').toString().toLowerCase();
+
+                        if (lt === 'Инструкция' || lt.indexOf('жалоб') !== -1 || href.indexOf('delete') !== -1 ||
+                            href.indexOf('/user') !== -1 || href.indexOf('/profile') !== -1 || href.indexOf('/wm/') !== -1 ||
+                            lt === 'Посмотреть видео') {
                             continue;
                         }
-                        if (lt.length > 0 || links[l].className.indexOf('serf') !== -1 || href.indexOf('javascript') !== -1 || links[l].getAttribute('onclick')) {
+
+                        if (cls.indexOf('serf-url') !== -1 || cls.indexOf('title') !== -1 ||
+                            oc.indexOf('start') !== -1 || oc.indexOf('func') !== -1 ||
+                            href.indexOf('youtube') !== -1 || href.indexOf('youtu.be') !== -1 ||
+                            href.indexOf('/go/') !== -1 || href.indexOf('/vl/') !== -1 ||
+                            lt.length > 2) {
                             candidateLink = links[l];
                             break;
                         }
                     }
 
-                    if (existingBtn || candidateLink) {
+                    if (startBtnAlreadyVisible || candidateLink) {
                         foundRow = row;
+                        window._avisoLastTaskRow = row;
                         durationSec = sec;
                         taskTitle = (candidateLink ? candidateLink.innerText.trim() : rText.split('\n')[0].trim()).substring(0, 80);
-                        blueLink = candidateLink;
-                        startBtn = existingBtn;
+                        targetLink = candidateLink;
                         break;
                     }
                 }
 
-                if (!foundRow) {
+                if (!foundRow || (!startBtnAlreadyVisible && !targetLink)) {
                     if (window.AvisoBridge && window.AvisoBridge.onAutoWorkNoTasks) {
                         window.AvisoBridge.onAutoWorkNoTasks();
                     }
@@ -325,70 +485,104 @@ object AvisoTaskParser {
                     window.AvisoBridge.onAutoWorkTaskFound(taskTitle || 'YouTube Task', durationSec);
                 }
 
-                // If "Приступить к выполнению" button is already there, click it directly
-                if (startBtn) {
-                    startBtn.click();
+                // If "Приступить к просмотру" is ALREADY visible in this row, click it immediately!
+                if (startBtnAlreadyVisible) {
+                    safeClick(startBtnAlreadyVisible);
                     if (window.AvisoBridge && window.AvisoBridge.onAutoWorkTaskStarted) {
                         window.AvisoBridge.onAutoWorkTaskStarted(durationSec);
                     }
-                } else if (blueLink) {
-                    // Click blue link
-                    blueLink.click();
+                    return;
+                }
 
-                    // Check if clicking blue link revealed "Приступить к выполнению" or "Start Watching" interstitial
-                    setTimeout(function() {
-                        var bText = (document.body ? document.body.innerText : '') || '';
-                        var bLower = bText.toLowerCase();
+                // Otherwise, click the task link to reveal "Приступить к просмотру"
+                safeClick(targetLink);
 
-                        // Check if interstitial screen appeared
-                        if (bLower.indexOf('to count your view') !== -1 || bLower.indexOf('please watch the video for at least') !== -1 || bLower.indexOf('start watching') !== -1 || bLower.indexOf('начать просмотр') !== -1) {
-                            var interSec = 0;
-                            var mMS = bLower.match(/(\d+)\s*(?:minute|min|минут)[s]?\s*(?:and\s*)?(\d+)\s*(?:second|sec|секунд)[s]?/i);
-                            if (mMS) {
-                                interSec = (parseInt(mMS[1], 10) || 0) * 60 + (parseInt(mMS[2], 10) || 0);
-                            }
-                            if (interSec === 0) {
-                                var mM = bLower.match(/(\d+)\s*(?:minute|min|минут)[s]?/i);
-                                if (mM) interSec = (parseInt(mM[1], 10) || 0) * 60;
-                            }
-                            if (interSec === 0) {
-                                var mS = bLower.match(/(\d+)\s*(?:second|sec|секунд)[s]?/i);
-                                if (mS) interSec = parseInt(mS[1], 10) || 0;
-                            }
-                            if (interSec <= 0) interSec = 40;
+                // Poll for "Приступить к просмотру" or direct navigation
+                var pollAttempts = 0;
+                var maxAttempts = 24;
+                var pollTimer = setInterval(function() {
+                    pollAttempts++;
+                    var curText = (document.body ? document.body.innerText : '') || '';
+                    var curLower = curText.toLowerCase();
 
-                            durationSec = interSec;
-
-                            var btns = document.querySelectorAll('button, a, input[type="button"], div[role="button"], span[role="button"], div, span');
-                            for (var b = 0; b < btns.length; b++) {
-                                var bt = (btns[b].innerText || btns[b].value || '').trim().toLowerCase();
-                                if (bt === 'start watching' || bt.indexOf('start watching') !== -1 || bt === 'начать просмотр') {
-                                    try { btns[b].click(); } catch(e) {}
-                                    try { btns[b].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window })); } catch(e) {}
-                                    if (window.AvisoBridge && window.AvisoBridge.onInterstitialHandled) {
-                                        window.AvisoBridge.onInterstitialHandled(durationSec);
-                                    }
-                                    break;
+                    // Check if Interstitial appeared
+                    if (curLower.indexOf('to count your view') !== -1 || curLower.indexOf('please watch the video') !== -1 || curLower.indexOf('start watching') !== -1 || curLower.indexOf('начать просмотр') !== -1) {
+                        clearInterval(pollTimer);
+                        var dur = extractDuration(curText);
+                        var sbEls = document.querySelectorAll('button, a, input[type="button"], span, div');
+                        for (var sb = 0; sb < sbEls.length; sb++) {
+                            var sTxt = (sbEls[sb].innerText || sbEls[sb].value || '').trim().toLowerCase();
+                            if (sTxt === 'start watching' || sTxt.indexOf('start watching') !== -1 || sTxt === 'начать просмотр' || sTxt.indexOf('приступить к просмотру') !== -1) {
+                                safeClick(sbEls[sb]);
+                                if (window.AvisoBridge && window.AvisoBridge.onInterstitialHandled) {
+                                    window.AvisoBridge.onInterstitialHandled(dur);
                                 }
-                            }
-                        } else {
-                            var innerEls = foundRow.querySelectorAll('*');
-                            var clickedAction = false;
-                            for (var m = 0; m < innerEls.length; m++) {
-                                var t = (innerEls[m].innerText || innerEls[m].value || '').trim();
-                                if (t.indexOf('Приступить к выполнению') !== -1 || t.indexOf('Подтвердить просмотр') !== -1 || t.indexOf('Начать') !== -1) {
-                                    innerEls[m].click();
-                                    clickedAction = true;
-                                    break;
+                                if (window.AvisoBridge && window.AvisoBridge.onAutoWorkTaskStarted) {
+                                    window.AvisoBridge.onAutoWorkTaskStarted(dur);
                                 }
+                                return;
                             }
                         }
+                        return;
+                    }
 
+                    // Check if "Приступить к просмотру" appeared in the row
+                    var rowBtns = foundRow.querySelectorAll('button, a, input[type="button"], span, div');
+                    var foundAction = false;
+                    for (var rb = 0; rb < rowBtns.length; rb++) {
+                        var rEl = rowBtns[rb];
+                        if (isStartWatchingBtn(rEl)) {
+                            clearInterval(pollTimer);
+                            safeClick(rEl);
+                            foundAction = true;
+                            if (window.AvisoBridge && window.AvisoBridge.onAutoWorkTaskStarted) {
+                                window.AvisoBridge.onAutoWorkTaskStarted(durationSec);
+                            }
+                            return;
+                        }
+                    }
+
+                    // Check if any global button appeared
+                    if (!foundAction) {
+                        var gBtns = document.querySelectorAll('button, a, input[type="button"], span, div');
+                        for (var gb = 0; gb < gBtns.length; gb++) {
+                            var gEl = gBtns[gb];
+                            if (isStartWatchingBtn(gEl)) {
+                                clearInterval(pollTimer);
+                                safeClick(gEl);
+                                foundAction = true;
+                                if (window.AvisoBridge && window.AvisoBridge.onAutoWorkTaskStarted) {
+                                    window.AvisoBridge.onAutoWorkTaskStarted(durationSec);
+                                }
+                                return;
+                            }
+                        }
+                    }
+
+                    // Check if page navigated directly
+                    if (window.location.href.indexOf('/vl') !== -1 || window.location.href.indexOf('/go/') !== -1 || window.location.href.indexOf('youtube') !== -1 || window.location.href.indexOf('create_session') !== -1) {
+                        clearInterval(pollTimer);
                         if (window.AvisoBridge && window.AvisoBridge.onAutoWorkTaskStarted) {
                             window.AvisoBridge.onAutoWorkTaskStarted(durationSec);
                         }
-                    }, 600);
-                }
+                        return;
+                    }
+
+                    if (pollAttempts >= maxAttempts) {
+                        clearInterval(pollTimer);
+                        // Trigger task started as fallback if page is about to load
+                        if (window.location.href.indexOf('tasks-youtube') === -1) {
+                            if (window.AvisoBridge && window.AvisoBridge.onAutoWorkTaskStarted) {
+                                window.AvisoBridge.onAutoWorkTaskStarted(durationSec);
+                            }
+                        } else {
+                            if (window.AvisoBridge && window.AvisoBridge.onError) {
+                                window.AvisoBridge.onError('ভিডিও লিঙ্ক বা বোতাম খুঁজে পাওয়া যায়নি');
+                            }
+                        }
+                    }
+                }, 150);
+
             } catch (err) {
                 if (window.AvisoBridge && window.AvisoBridge.onError) {
                     window.AvisoBridge.onError('AutoWork start error: ' + err.toString());
@@ -407,21 +601,20 @@ object AvisoTaskParser {
     const val JS_START_AND_WATCH_VIDEO = """
         (function() {
             try {
-                // 1. Captcha Check
-                var bodyText = (document.body ? document.body.innerText : '') || '';
-                var textLower = bodyText.toLowerCase();
-                var captchaPhrases = ['капч', 'captcha', 'recaptcha', 'hcaptcha', 'я не робот'];
-                for (var c = 0; c < captchaPhrases.length; c++) {
-                    if (textLower.indexOf(captchaPhrases[c]) !== -1) {
-                        if (window.AvisoBridge && window.AvisoBridge.onCaptchaFound) {
-                            window.AvisoBridge.onCaptchaFound('ক্যাপচা সনাক্ত');
-                        }
-                        return;
+                // 1. Check for genuine blocking captcha iframe / widget only
+                var realCaptcha = document.querySelector('iframe[src*="recaptcha/api2/bframe"], iframe[src*="challenges.cloudflare"], #captcha_block, .modal-captcha');
+                if (realCaptcha && realCaptcha.offsetParent !== null && realCaptcha.offsetWidth > 30) {
+                    if (window.AvisoBridge && window.AvisoBridge.onCaptchaFound) {
+                        window.AvisoBridge.onCaptchaFound('ক্যাপচা সমাধান প্রয়োজন');
                     }
+                    return;
                 }
 
+                var bodyText = (document.body ? document.body.innerText : '') || '';
+                var textLower = bodyText.toLowerCase();
+
                 // 1b. Check and handle "Start Watching" Interstitial Screen if present
-                if (textLower.indexOf('to count your view') !== -1 || textLower.indexOf('please watch the video for at least') !== -1 || textLower.indexOf('start watching') !== -1 || textLower.indexOf('начать просмотр') !== -1) {
+                if (textLower.indexOf('to count your view') !== -1 || textLower.indexOf('please watch the video for at least') !== -1 || textLower.indexOf('start watching') !== -1 || textLower.indexOf('начать просмотр') !== -1 || textLower.indexOf('приступить к просмотру') !== -1) {
                     var interSec = 0;
                     var mMS = textLower.match(/(\d+)\s*(?:minute|min|минут)[s]?\s*(?:and\s*)?(\d+)\s*(?:second|sec|секунд)[s]?/i);
                     if (mMS) {
@@ -440,7 +633,7 @@ object AvisoTaskParser {
                     var startWatchBtns = document.querySelectorAll('button, a, input[type="button"], div[role="button"], span[role="button"], div, span');
                     for (var swb = 0; swb < startWatchBtns.length; swb++) {
                         var swTxt = (startWatchBtns[swb].innerText || startWatchBtns[swb].value || '').trim().toLowerCase();
-                        if (swTxt === 'start watching' || swTxt.indexOf('start watching') !== -1 || swTxt === 'начать просмотр') {
+                        if (swTxt === 'start watching' || swTxt.indexOf('start watching') !== -1 || swTxt === 'начать просмотр' || swTxt.indexOf('начать просмотр') !== -1 || swTxt.indexOf('приступить к просмотру') !== -1) {
                             try { startWatchBtns[swb].click(); } catch(e) {}
                             try { startWatchBtns[swb].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window })); } catch(e) {}
                             if (window.AvisoBridge && window.AvisoBridge.onInterstitialHandled) {
@@ -545,33 +738,102 @@ object AvisoTaskParser {
     """
 
     /**
-     * Clicks "Подтвердить просмотр" (Confirm view) or "Подтвердить" button.
+     * Clicks "Подтвердить просмотр" (Confirm view), "Проверить" (Check/Verify), or "Подтвердить" button:
+     * - First scrolls to and checks inside window._avisoLastTaskRow (returning to the exact task in Aviso).
+     * - Checks all global elements for confirmation buttons with full mouse event dispatch.
+     * - Reports success to Kotlin bridge.
      */
     const val JS_AUTO_WORK_CLICK_CONFIRM = """
         (function() {
             try {
-                // Captcha check first
-                var bodyText = (document.body ? document.body.innerText : '') || '';
-                var textLower = bodyText.toLowerCase();
-                var captchaPhrases = ['капч', 'captcha', 'recaptcha', 'hcaptcha', 'я не робот'];
-                for (var c = 0; c < captchaPhrases.length; c++) {
-                    if (textLower.indexOf(captchaPhrases[c]) !== -1) {
-                        if (window.AvisoBridge && window.AvisoBridge.onCaptchaFound) {
-                            window.AvisoBridge.onCaptchaFound('ক্যাপচা সনাক্ত');
-                        }
-                        return;
+                function safeClick(el) {
+                    if (!el) return false;
+                    try { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch(e) {}
+                    try { el.focus(); } catch(e) {}
+                    try {
+                        var rect = el.getBoundingClientRect();
+                        var cx = rect.left + rect.width / 2;
+                        var cy = rect.top + rect.height / 2;
+                        var mdown = new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy });
+                        var mup = new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy });
+                        var mclick = new MouseEvent('click', { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy });
+                        el.dispatchEvent(mdown);
+                        el.dispatchEvent(mup);
+                        el.dispatchEvent(mclick);
+                    } catch(e) {}
+                    try { el.click(); } catch(e) {}
+                    if (el.getAttribute && el.getAttribute('onclick')) {
+                        try {
+                            var fn = new Function(el.getAttribute('onclick'));
+                            fn.call(el);
+                        } catch(e) {}
                     }
+                    return true;
+                }
+
+                function isConfirmBtn(el) {
+                    if (!el) return false;
+                    var t = (el.innerText || el.value || '').trim().toLowerCase();
+                    var cls = (el.className || '').toString().toLowerCase();
+                    var oc = (el.getAttribute('onclick') || '').toLowerCase();
+                    var id = (el.id || '').toLowerCase();
+
+                    if (!t && !cls && !oc && !id) return false;
+
+                    if (t.indexOf('подтвердить просмотр') !== -1 ||
+                        t.indexOf('подтвердить') !== -1 ||
+                        t.indexOf('проверить выполнение') !== -1 ||
+                        t.indexOf('проверить') !== -1 ||
+                        t.indexOf('забрать') !== -1 ||
+                        t.indexOf('получить вознаграждение') !== -1 ||
+                        t.indexOf('получить награду') !== -1 ||
+                        t.indexOf('получить') !== -1 ||
+                        t.indexOf('confirm view') !== -1 ||
+                        t.indexOf('confirm') !== -1 ||
+                        t.indexOf('verify') !== -1 ||
+                        t.indexOf('claim') !== -1) {
+                        return true;
+                    }
+
+                    if (cls.indexOf('btn_confirm') !== -1 ||
+                        cls.indexOf('btn_check') !== -1 ||
+                        cls.indexOf('confirm-btn') !== -1 ||
+                        oc.indexOf('confirm') !== -1 ||
+                        oc.indexOf('check_task') !== -1 ||
+                        oc.indexOf('check_adv') !== -1 ||
+                        id.indexOf('confirm') !== -1 ||
+                        id.indexOf('check') !== -1) {
+                        return true;
+                    }
+                    return false;
                 }
 
                 var clicked = false;
-                var candidates = document.querySelectorAll('button, a, input[type="button"], span, div');
-                for (var i = 0; i < candidates.length; i++) {
-                    var el = candidates[i];
-                    var txt = (el.innerText || el.value || '').trim();
-                    if (txt.indexOf('Подтвердить просмотр') !== -1 || txt.indexOf('Подтвердить') !== -1 || txt.indexOf('Приступить к выполнению') !== -1) {
-                        el.click();
-                        clicked = true;
-                        break;
+
+                // 1. First check inside the saved active task row!
+                if (window._avisoLastTaskRow && document.body.contains(window._avisoLastTaskRow)) {
+                    var row = window._avisoLastTaskRow;
+                    try { row.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch(e) {}
+                    var rowCandidates = row.querySelectorAll('button, a, input[type="button"], span[role="button"], div[role="button"], span, div');
+                    for (var r = 0; r < rowCandidates.length; r++) {
+                        if (isConfirmBtn(rowCandidates[r])) {
+                            safeClick(rowCandidates[r]);
+                            clicked = true;
+                            break;
+                        }
+                    }
+                }
+
+                // 2. Global search on the page
+                if (!clicked) {
+                    var allCandidates = document.querySelectorAll('button, a, input[type="button"], span[role="button"], div[role="button"], span, div');
+                    for (var i = 0; i < allCandidates.length; i++) {
+                        var el = allCandidates[i];
+                        if (isConfirmBtn(el)) {
+                            safeClick(el);
+                            clicked = true;
+                            break;
+                        }
                     }
                 }
 
@@ -604,7 +866,8 @@ object AvisoTaskParser {
                     textLower.indexOf('start watching') !== -1 ||
                     textLower.indexOf('чтобы засчитать просмотр') !== -1 ||
                     textLower.indexOf('посмотрите видео не менее') !== -1 ||
-                    textLower.indexOf('начать просмотр') !== -1
+                    textLower.indexOf('начать просмотр') !== -1 ||
+                    textLower.indexOf('приступить к просмотру') !== -1
                 );
 
                 if (!isInterstitial) return 0;
@@ -628,7 +891,7 @@ object AvisoTaskParser {
                 for (var i = 0; i < clickables.length; i++) {
                     var el = clickables[i];
                     var txt = (el.innerText || el.value || '').trim().toLowerCase();
-                    if (txt === 'start watching' || txt.indexOf('start watching') !== -1 || txt === 'начать просмотр') {
+                    if (txt === 'start watching' || txt.indexOf('start watching') !== -1 || txt === 'начать просмотр' || txt.indexOf('начать просмотр') !== -1 || txt.indexOf('приступить к просмотру') !== -1) {
                         try { el.click(); } catch(e) {}
                         try {
                             var evt = new MouseEvent('click', { bubbles: true, cancelable: true, view: window });
