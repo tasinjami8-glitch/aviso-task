@@ -44,11 +44,11 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.11.1'
+          gradle-version: '9.3.1'
 
       - name: Build with Gradle
         run: |
-          gradle :app:assembleDebug --no-daemon --stacktrace
+          gradle :app:assembleDebug --no-daemon --stacktrace --info
           echo "Listing all generated APK files:"
           find app/build/outputs/ -type f -name "*.apk" || true
 
