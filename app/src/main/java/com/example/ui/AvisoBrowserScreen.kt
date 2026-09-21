@@ -46,10 +46,12 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -72,6 +74,7 @@ import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.ZoomIn
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -96,6 +99,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -105,10 +109,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.zIndex
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import android.widget.Toast
+import com.example.model.BrowserTab
 import com.example.util.AvisoNotificationHelper
 import com.example.util.AvisoTaskParser
 import com.example.viewmodel.AvisoViewModel
@@ -369,6 +375,7 @@ fun AvisoBrowserScreen(
     var manualWatchTotal by remember { mutableStateOf<Int?>(null) }
     var showOverlayPromptDialog by remember { mutableStateOf(false) }
     var didDismissOverlayPrompt by remember { mutableStateOf(false) }
+    var showTabsOverviewDialog by remember { mutableStateOf(false) }
 
     var fileUploadCallback by remember { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
     val fileChooserLauncher = rememberLauncherForActivityResult(
@@ -818,6 +825,27 @@ fun AvisoBrowserScreen(
                             Icon(Icons.Default.Home, contentDescription = "হোম")
                         }
 
+                        // Chrome-style Tabs Switcher Button (showing count e.g. 2)
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = MaterialTheme.colorScheme.secondaryContainer,
+                            border = BorderStroke(1.2.dp, MaterialTheme.colorScheme.primary),
+                            modifier = Modifier
+                                .size(28.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .clickable { showTabsOverviewDialog = true }
+                                .testTag("btn_tabs_overview")
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = "${uiState.tabs.size}",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                                )
+                            }
+                        }
+
                         // Refresh Button
                         IconButton(
                             onClick = { viewModel.reloadPage() },
@@ -1024,139 +1052,13 @@ fun AvisoBrowserScreen(
             val activeTab = uiState.tabs.find { it.id == uiState.activeTabId }
             val isCurrentTabVideo = (activeTab?.isVideoTab == true || uiState.selectedTabIndex == 1) && uiState.isVideoTabOpen && !uiState.videoTabUrl.isNullOrEmpty()
 
-            // Video Player Tab View (When active tab is video)
-            if (isCurrentTabVideo) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color(0xFF0F172A))
-                        .testTag("video_tab_container")
-                ) {
-                    // Top Info Banner in Tab 2
-                    Surface(
-                        color = Color(0xFF1E293B),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(28.dp)
-                                            .clip(CircleShape)
-                                            .background(Color(0xFFEF4444)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.PlayArrow,
-                                            contentDescription = null,
-                                            tint = Color.White,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.width(10.dp))
-                                    Column {
-                                        Text(
-                                            text = "🎬 ভিডিও দেখা হচ্ছে: ${uiState.videoTabRemainingSec} সেকেন্ড বাকি",
-                                            color = Color.White,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 13.sp
-                                        )
-                                        Text(
-                                            text = "সময় শেষ হলে ট্যাব একাই বন্ধ হয়ে মূল পেজে কনফার্ম করবে ✓",
-                                            color = Color(0xFF94A3B8),
-                                            fontSize = 11.sp
-                                        )
-                                    }
-                                }
-
-                                OutlinedButton(
-                                    onClick = {
-                                        viewModel.closeVideoTab()
-                                        viewModel.selectTab(0)
-                                    },
-                                    modifier = Modifier.height(32.dp),
-                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                                    border = BorderStroke(1.dp, Color(0xFFEF4444))
-                                ) {
-                                    Icon(
-                                        Icons.Default.Close,
-                                        contentDescription = null,
-                                        tint = Color(0xFFEF4444),
-                                        modifier = Modifier.size(14.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("ট্যাব বন্ধ", fontSize = 11.sp, color = Color(0xFFEF4444))
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.height(8.dp))
-                            val tot = if (uiState.videoTabDuration > 0) uiState.videoTabDuration else 20
-                            LinearProgressIndicator(
-                                progress = { (uiState.videoTabRemainingSec.toFloat() / tot).coerceIn(0f, 1f) },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(4.dp)
-                                    .clip(RoundedCornerShape(2.dp)),
-                                color = Color(0xFFEF4444),
-                                trackColor = Color(0xFF334155)
-                            )
-                        }
-                    }
-
-                    // Video WebView inside Tab 2
-                    AndroidView(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .weight(1f)
-                            .testTag("secondary_video_webview"),
-                        factory = { ctx ->
-                            WebView(ctx).apply {
-                                layoutParams = ViewGroup.LayoutParams(
-                                    ViewGroup.LayoutParams.MATCH_PARENT,
-                                    ViewGroup.LayoutParams.MATCH_PARENT
-                                )
-                                val cookieManager = CookieManager.getInstance()
-                                cookieManager.setAcceptCookie(true)
-                                cookieManager.setAcceptThirdPartyCookies(this, true)
-
-                                settings.apply {
-                                    javaScriptEnabled = true
-                                    domStorageEnabled = true
-                                    databaseEnabled = true
-                                    loadWithOverviewMode = true
-                                    useWideViewPort = true
-                                    mediaPlaybackRequiresUserGesture = false
-                                    userAgentString = "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36"
-                                }
-
-                                webChromeClient = WebChromeClient()
-                                webViewClient = object : WebViewClient() {
-                                    override fun onPageFinished(view: WebView?, url: String?) {
-                                        view?.evaluateJavascript(AvisoTaskParser.JS_START_AND_WATCH_VIDEO, null)
-                                    }
-                                }
-
-                                uiState.videoTabUrl?.let { loadUrl(it) }
-                                secondaryWebViewRef = this
-                            }
-                        },
-                        update = { wv ->
-                            secondaryWebViewRef = wv
-                        }
-                    )
-                }
-            } else {
-                // Tab 0: Main Web Browser View
+            // Layer 1: Main Web Browser View (Aviso Tab) - ALWAYS in hierarchy, never destroyed
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .zIndex(if (!isCurrentTabVideo) 2f else 1f)
+                    .alpha(if (!isCurrentTabVideo) 1f else 0.001f)
+            ) {
                 AndroidView(
                     modifier = Modifier
                         .fillMaxSize()
@@ -1310,46 +1212,39 @@ fun AvisoBrowserScreen(
                                     isUserGesture: Boolean,
                                     resultMsg: Message?
                                 ): Boolean {
-                                    val mainWebView = view ?: return false
-                                    val tempWebView = WebView(mainWebView.context).apply {
+                                    val mainWv = view ?: return false
+                                    val tempWebView = WebView(mainWv.context).apply {
                                         settings.javaScriptEnabled = true
                                         settings.domStorageEnabled = true
-                                        settings.userAgentString = mainWebView.settings.userAgentString
+                                        settings.userAgentString = mainWv.settings.userAgentString
                                     }
                                     tempWebView.webViewClient = object : WebViewClient() {
-                                        override fun shouldOverrideUrlLoading(v: WebView?, request: WebResourceRequest?): Boolean {
-                                            val targetUrl = request?.url?.toString().orEmpty()
-                                            if (targetUrl.isNotEmpty()) {
-                                                if (targetUrl.contains("youtube.com") || targetUrl.contains("youtu.be") || targetUrl.contains("/vl/") || targetUrl.contains("/go/") || targetUrl.contains("create_session")) {
-                                                    if (uiState.openInExternalYouTubeApp) {
-                                                        launchYouTubeApp(ctx, targetUrl)
-                                                    }
-                                                    viewModel.openVideoTab(targetUrl, 20)
-                                                } else {
-                                                    mainWebView.post {
-                                                        mainWebView.loadUrl(targetUrl)
+                                        private fun handleNewWindow(targetUrl: String) {
+                                            if (targetUrl.isNotEmpty() && targetUrl != "about:blank") {
+                                                mainWv.post {
+                                                    if (targetUrl.contains("youtube.com") || targetUrl.contains("youtu.be") || targetUrl.contains("/vl/") || targetUrl.contains("/go/") || targetUrl.contains("create_session") || targetUrl.contains("youtube.php")) {
+                                                        if (uiState.openInExternalYouTubeApp) {
+                                                            launchYouTubeApp(ctx, targetUrl)
+                                                        }
+                                                        viewModel.openVideoTab(targetUrl, 20)
+                                                    } else {
+                                                        viewModel.addNewTab(targetUrl, "ট্যাব ${uiState.tabs.size + 1}")
                                                     }
                                                 }
-                                                v?.destroy()
                                             }
+                                        }
+
+                                        override fun shouldOverrideUrlLoading(v: WebView?, request: WebResourceRequest?): Boolean {
+                                            val targetUrl = request?.url?.toString().orEmpty()
+                                            handleNewWindow(targetUrl)
+                                            v?.destroy()
                                             return true
                                         }
 
                                         override fun onPageStarted(v: WebView?, url: String?, favicon: Bitmap?) {
                                             val targetUrl = url.orEmpty()
-                                            if (targetUrl.isNotEmpty() && targetUrl != "about:blank") {
-                                                if (targetUrl.contains("youtube.com") || targetUrl.contains("youtu.be") || targetUrl.contains("/vl/") || targetUrl.contains("/go/") || targetUrl.contains("create_session")) {
-                                                    if (uiState.openInExternalYouTubeApp) {
-                                                        launchYouTubeApp(ctx, targetUrl)
-                                                    }
-                                                    viewModel.openVideoTab(targetUrl, 20)
-                                                } else {
-                                                    mainWebView.post {
-                                                        mainWebView.loadUrl(targetUrl)
-                                                    }
-                                                }
-                                                v?.destroy()
-                                            }
+                                            handleNewWindow(targetUrl)
+                                            v?.destroy()
                                         }
                                     }
                                     val transport = resultMsg?.obj as? WebView.WebViewTransport
@@ -1446,6 +1341,146 @@ fun AvisoBrowserScreen(
                         canGoBack = wv.canGoBack()
                     }
                 )
+            }
+
+            // Layer 2: Video Player Tab View
+            if (uiState.isVideoTabOpen && !uiState.videoTabUrl.isNullOrEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .zIndex(if (isCurrentTabVideo) 2f else 0f)
+                        .alpha(if (isCurrentTabVideo) 1f else 0.001f)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color(0xFF0F172A))
+                            .testTag("video_tab_container")
+                    ) {
+                        // Top Info Banner in Tab 2
+                        Surface(
+                            color = Color(0xFF1E293B),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(28.dp)
+                                                .clip(CircleShape)
+                                                .background(Color(0xFFEF4444)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.PlayArrow,
+                                                contentDescription = null,
+                                                tint = Color.White,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Column {
+                                            Text(
+                                                text = "🎬 ভিডিও দেখা হচ্ছে: ${uiState.videoTabRemainingSec} সেকেন্ড বাকি",
+                                                color = Color.White,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 13.sp
+                                            )
+                                            Text(
+                                                text = "ট্যাব পরিবর্তন করতে উপরের ট্যাবে ক্লিক করুন | শেষ হলে মূল পেজে কনফার্ম হবে ✓",
+                                                color = Color(0xFF94A3B8),
+                                                fontSize = 11.sp
+                                            )
+                                        }
+                                    }
+
+                                    OutlinedButton(
+                                        onClick = {
+                                            viewModel.closeVideoTab()
+                                            viewModel.selectTab(0)
+                                        },
+                                        modifier = Modifier.height(32.dp),
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                        border = BorderStroke(1.dp, Color(0xFFEF4444))
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Close,
+                                            contentDescription = null,
+                                            tint = Color(0xFFEF4444),
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("ট্যাব বন্ধ", fontSize = 11.sp, color = Color(0xFFEF4444))
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(8.dp))
+                                val tot = if (uiState.videoTabDuration > 0) uiState.videoTabDuration else 20
+                                LinearProgressIndicator(
+                                    progress = { (uiState.videoTabRemainingSec.toFloat() / tot).coerceIn(0f, 1f) },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(4.dp)
+                                        .clip(RoundedCornerShape(2.dp)),
+                                    color = Color(0xFFEF4444),
+                                    trackColor = Color(0xFF334155)
+                                )
+                            }
+                        }
+
+                        // Video WebView inside Tab 2
+                        AndroidView(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .weight(1f)
+                                .testTag("secondary_video_webview"),
+                            factory = { ctx ->
+                                WebView(ctx).apply {
+                                    layoutParams = ViewGroup.LayoutParams(
+                                        ViewGroup.LayoutParams.MATCH_PARENT,
+                                        ViewGroup.LayoutParams.MATCH_PARENT
+                                    )
+                                    val cookieManager = CookieManager.getInstance()
+                                    cookieManager.setAcceptCookie(true)
+                                    cookieManager.setAcceptThirdPartyCookies(this, true)
+
+                                    settings.apply {
+                                        javaScriptEnabled = true
+                                        domStorageEnabled = true
+                                        databaseEnabled = true
+                                        loadWithOverviewMode = true
+                                        useWideViewPort = true
+                                        mediaPlaybackRequiresUserGesture = false
+                                        userAgentString = "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36"
+                                    }
+
+                                    webChromeClient = WebChromeClient()
+                                    webViewClient = object : WebViewClient() {
+                                        override fun onPageFinished(view: WebView?, url: String?) {
+                                            view?.evaluateJavascript(AvisoTaskParser.JS_START_AND_WATCH_VIDEO, null)
+                                        }
+                                    }
+
+                                    uiState.videoTabUrl?.let { loadUrl(it) }
+                                    secondaryWebViewRef = this
+                                }
+                            },
+                            update = { wv ->
+                                secondaryWebViewRef = wv
+                            }
+                        )
+                    }
+                }
             }
 
             // Error Overlay if Connection Fails
@@ -1930,6 +1965,164 @@ fun AvisoBrowserScreen(
                     uiState = uiState,
                     viewModel = viewModel,
                     onClose = { viewModel.closeSidebar() }
+                )
+            }
+
+            // Real Browser Tabs Overview Dialog ("ঘরের মত / ট্যাবস আইকন ভিউ")
+            if (showTabsOverviewDialog) {
+                AlertDialog(
+                    onDismissRequest = { showTabsOverviewDialog = false },
+                    title = {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.Language,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "খোলা ট্যাবসমূহ (${uiState.tabs.size})",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            IconButton(
+                                onClick = { showTabsOverviewDialog = false },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Close,
+                                    contentDescription = "বন্ধ করুন",
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    },
+                    text = {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 400.dp)
+                        ) {
+                            LazyColumn(
+                                modifier = Modifier
+                                    .weight(1f, fill = false)
+                                    .fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                items(uiState.tabs, key = { it.id }) { tab ->
+                                    val isSelected = tab.id == uiState.activeTabId
+                                    Surface(
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                                        border = BorderStroke(
+                                            1.5.dp,
+                                            if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+                                        ),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .clickable {
+                                                viewModel.selectTabById(tab.id)
+                                                showTabsOverviewDialog = false
+                                            }
+                                    ) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(12.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                modifier = Modifier.weight(1f)
+                                            ) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(36.dp)
+                                                        .clip(CircleShape)
+                                                        .background(
+                                                            if (tab.isVideoTab) Color(0xFFEF4444) else MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                                                        ),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Icon(
+                                                        imageVector = if (tab.isVideoTab) Icons.Default.PlayArrow else Icons.Default.Language,
+                                                        contentDescription = null,
+                                                        tint = if (tab.isVideoTab) Color.White else MaterialTheme.colorScheme.primary,
+                                                        modifier = Modifier.size(20.dp)
+                                                    )
+                                                }
+                                                Spacer(modifier = Modifier.width(10.dp))
+                                                Column {
+                                                    Text(
+                                                        text = if (tab.isVideoTab) {
+                                                            if (tab.remainingSec > 0) "🎬 ভিডিও দেখা হচ্ছে (${tab.remainingSec}s)" else "🎬 ভিডিও ট্যাব"
+                                                        } else {
+                                                            tab.title.ifEmpty { "Aviso.bz" }
+                                                        },
+                                                        fontWeight = FontWeight.Bold,
+                                                        fontSize = 13.5.sp,
+                                                        color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                    Text(
+                                                        text = if (isSelected) "🟢 সক্রিয় ট্যাব" else tab.url,
+                                                        fontSize = 11.5.sp,
+                                                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                }
+                                            }
+
+                                            if (uiState.tabs.size > 1 || tab.isVideoTab) {
+                                                IconButton(
+                                                    onClick = {
+                                                        if (tab.isVideoTab) {
+                                                            viewModel.closeVideoTab()
+                                                        } else {
+                                                            viewModel.closeTabById(tab.id)
+                                                        }
+                                                    },
+                                                    modifier = Modifier.size(32.dp)
+                                                ) {
+                                                    Icon(
+                                                        Icons.Default.Close,
+                                                        contentDescription = "ট্যাব বন্ধ করুন",
+                                                        tint = if (tab.isVideoTab) Color(0xFFEF4444) else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Button(
+                                onClick = {
+                                    viewModel.addNewTab("https://aviso.bz/tasks-youtube", "ট্যাব ${uiState.tabs.size + 1}")
+                                    showTabsOverviewDialog = false
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("+ নতুন ট্যাব তৈরি করুন")
+                            }
+                        }
+                    },
+                    confirmButton = {}
                 )
             }
         }

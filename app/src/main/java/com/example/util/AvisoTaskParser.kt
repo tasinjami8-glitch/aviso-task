@@ -145,21 +145,23 @@ object AvisoTaskParser {
                 function handleOpenUrl(url) {
                     if (!url || url === 'about:blank' || url.indexOf('javascript:') === 0) return;
                     var isYT = (url.indexOf('youtube.com') !== -1 || url.indexOf('youtu.be') !== -1);
-                    var isSession = (url.indexOf('/vl/') !== -1 || url.indexOf('/go/') !== -1 || url.indexOf('create_session') !== -1);
+                    var isSession = (url.indexOf('/vl/') !== -1 || url.indexOf('/go/') !== -1 || url.indexOf('create_session') !== -1 || url.indexOf('youtube.php') !== -1);
                     
                     if (isYT || isSession) {
                         if (window.AvisoBridge && window.AvisoBridge.openNewTab) {
                             window.AvisoBridge.openNewTab(url, 20);
                             return;
-                        } else if (window.AvisoBridge && window.AvisoBridge.openInYouTubeApp) {
-                            window.AvisoBridge.openInYouTubeApp(url);
+                        }
+                    } else {
+                        if (window.AvisoBridge && window.AvisoBridge.openNewTab) {
+                            window.AvisoBridge.openNewTab(url, 0);
                             return;
                         }
                     }
                     window.location.href = url;
                 }
 
-                // Override window.open to delegate to Tab system
+                // Override window.open to delegate to separate Tab system
                 window.open = function(url, target, features) {
                     if (url) {
                         handleOpenUrl(url);
@@ -189,36 +191,15 @@ object AvisoTaskParser {
                         var href = (a.getAttribute('href') || a.href || '').toString();
                         var target = (a.getAttribute('target') || '').toLowerCase();
                         var isYT = (href.indexOf('youtube.com') !== -1 || href.indexOf('youtu.be') !== -1);
-                        var isSession = (href.indexOf('/vl/') !== -1 || href.indexOf('/go/') !== -1 || href.indexOf('create_session') !== -1);
+                        var isSession = (href.indexOf('/vl/') !== -1 || href.indexOf('/go/') !== -1 || href.indexOf('create_session') !== -1 || href.indexOf('youtube.php') !== -1);
                         
-                        if (isYT || (target === '_blank' && isSession)) {
+                        if (isYT || isSession || target === '_blank') {
                             e.preventDefault();
                             handleOpenUrl(a.getAttribute('href') || a.href);
                             return;
                         }
                     }
                 }, true);
-
-                function enforceSelfTarget() {
-                    var blankLinks = document.querySelectorAll('a[target="_blank"], a[target="_new"]');
-                    for (var i = 0; i < blankLinks.length; i++) {
-                        var h = (blankLinks[i].getAttribute('href') || blankLinks[i].href || '').toString();
-                        var isYT = (h.indexOf('youtube.com') !== -1 || h.indexOf('youtu.be') !== -1);
-                        if (!isYT) {
-                            blankLinks[i].target = '_self';
-                            blankLinks[i].removeAttribute('target');
-                        }
-                    }
-                }
-
-                enforceSelfTarget();
-
-                if (window.MutationObserver) {
-                    var observer = new MutationObserver(function() {
-                        enforceSelfTarget();
-                    });
-                    observer.observe(document.documentElement || document.body, { childList: true, subtree: true });
-                }
             } catch(e) {}
         })();
     """
