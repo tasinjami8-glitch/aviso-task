@@ -435,12 +435,12 @@ object AvisoNotificationHelper {
 
             val notification = NotificationCompat.Builder(context, CHANNEL_TASKS_SILENT_ID)
                 .setSmallIcon(R.drawable.ic_launcher_foreground)
-                .setContentTitle("অটো-ওয়ার্ক ভিডিও দেখা হচ্ছে ($remainingSec সেক বাকি)")
-                .setContentText("মোট সময়: $totalSec সেকেন্ড | অ্যাপের বাইরে গেলেও কাউন্টডাউন চলছে...")
+                .setContentTitle("🎬 YouTube এ ভিডিও চলছে: ${remainingSec}s বাকি")
+                .setContentText("কাউন্টডাউন শেষ হলে নিজে থেকেই অ্যাপে ফিরে কাজ কনফার্ম করা হবে ✓")
                 .setProgress(100, progressPercent, false)
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
-                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setContentIntent(pendingIntent)
                 .build()
 
@@ -477,8 +477,8 @@ object AvisoNotificationHelper {
 
             val notification = NotificationCompat.Builder(context, CHANNEL_TASKS_ID)
                 .setSmallIcon(R.drawable.ic_launcher_foreground)
-                .setContentTitle("কাউন্টডাউন শেষ! কনফার্ম করা হচ্ছে...")
-                .setContentText("ভিডিও দেখা শেষ! Aviso-তে টাস্ক কনফার্ম (Confirm View) করা হচ্ছে।")
+                .setContentTitle("🎬 কাউন্টডাউন শেষ! কনফার্ম করা হয়েছে ✓")
+                .setContentText("ভিডিও দেখার সময় শেষ! Aviso-তে টাস্ক কনফার্ম করা হয়েছে।")
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setAutoCancel(true)
                 .setFullScreenIntent(pendingIntent, true)

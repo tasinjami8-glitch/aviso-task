@@ -760,12 +760,19 @@ object AvisoTaskParser {
                     }
                 }
 
-                // 3. YouTube Iframes: Trigger playback ONCE so it plays smoothly without repeated toggles
+                // 3. YouTube Iframes: Trigger playback ONCE and launch in YouTube App
                 if (!window._avisoVideoPlayTriggered) {
                     window._avisoVideoPlayTriggered = true;
                     var iframes = document.querySelectorAll('iframe[src*="youtube"], iframe[src*="youtu.be"], iframe#video-click, iframe');
                     for (var f = 0; f < iframes.length; f++) {
                         var ifr = iframes[f];
+                        var src = (ifr.getAttribute('src') || ifr.src || '').toString();
+                        if ((src.indexOf('youtube.com') !== -1 || src.indexOf('youtu.be') !== -1) && !window._avisoYtAppOpened) {
+                            window._avisoYtAppOpened = true;
+                            if (window.AvisoBridge && window.AvisoBridge.openInYouTubeApp) {
+                                window.AvisoBridge.openInYouTubeApp(src);
+                            }
+                        }
                         try {
                             ifr.contentWindow.postMessage('{"event":"command","func":"playVideo","args":""}', '*');
                             ifr.contentWindow.postMessage('{"event":"command","func":"unMute","args":""}', '*');

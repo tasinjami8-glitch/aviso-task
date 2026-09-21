@@ -385,21 +385,27 @@ fun AvisoBrowserScreen(
         if (uiState.isAutoWorkRunning) return@LaunchedEffect
 
         var rem = total
+        AvisoNotificationHelper.showAutoWorkProgressNotification(context, rem, total)
         while (rem > 0 && !uiState.isAutoWorkRunning) {
             manualWatchCountdown = rem
+            AvisoNotificationHelper.showAutoWorkProgressNotification(context, rem, total)
             // Ensure video playback is triggered and unmuted
             webViewRef?.evaluateJavascript(AvisoTaskParser.JS_START_AND_WATCH_VIDEO, null)
             delay(1000L)
             rem--
         }
         manualWatchCountdown = 0
+        AvisoNotificationHelper.cancelAutoWorkProgressNotification(context)
+        bringAppToFront(context)
+        AvisoNotificationHelper.sendAutoWorkFinishedNotification(context)
         if (!uiState.isAutoWorkRunning) {
+            delay(1000L)
             for (attempt in 1..4) {
                 webViewRef?.evaluateJavascript(AvisoTaskParser.JS_AUTO_WORK_CLICK_CONFIRM, null)
                 webViewRef?.evaluateJavascript(AvisoTaskParser.JS_START_AND_WATCH_VIDEO, null)
                 delay(1000L)
             }
-            Toast.makeText(context, "ভিডিও দেখা সম্পন্ন ও কনফার্ম করা হয়েছে ✓", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "🎬 ভিডিও দেখা সম্পন্ন ও কনফার্ম করা হয়েছে ✓", Toast.LENGTH_SHORT).show()
         }
         delay(2000L)
         manualWatchTotal = null
