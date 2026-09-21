@@ -137,21 +137,18 @@ object AvisoTaskParser {
 
     /**
      * Injected immediately into every page.
-     * Keeps Aviso session navigation internal while routing YouTube video links directly to the YouTube app.
+     * Keeps Aviso session navigation, popups, and YouTube videos inside the same WebView.
      */
     const val JS_SETUP_OVERRIDE = """
         (function() {
             try {
-                // Route YouTube URLs directly to YouTube app, or same-window for internal Aviso viewers
+                // Ensure all popups, Aviso session viewers, and task links open inside the SAME WebView without leaving Aviso
                 window.open = function(url, target, features) {
-                    if (url && (url.indexOf('youtube.com') !== -1 || url.indexOf('youtu.be') !== -1 || url.indexOf('vnd.youtube') !== -1)) {
-                        if (window.AvisoBridge && window.AvisoBridge.openInYouTubeApp) {
-                            window.AvisoBridge.openInYouTubeApp(url);
-                            return window;
-                        }
-                    }
                     if (url && url !== 'about:blank' && url.indexOf('javascript:') === -1) {
-                        window.location.href = url;
+                        // Do not redirect main Aviso window to external YouTube, which breaks the viewer
+                        if (url.indexOf('youtube.com') === -1 && url.indexOf('youtu.be') === -1) {
+                            window.location.href = url;
+                        }
                     }
                     return {
                         closed: false,
@@ -159,14 +156,10 @@ object AvisoTaskParser {
                         focus: function() {},
                         location: {
                             set href(val) {
-                                if (val && (val.indexOf('youtube.com') !== -1 || val.indexOf('youtu.be') !== -1 || val.indexOf('vnd.youtube') !== -1)) {
-                                    if (window.AvisoBridge && window.AvisoBridge.openInYouTubeApp) {
-                                        window.AvisoBridge.openInYouTubeApp(val);
-                                        return;
-                                    }
-                                }
                                 if (val && val !== 'about:blank' && val.indexOf('javascript:') === -1) {
-                                    window.location.href = val;
+                                    if (val.indexOf('youtube.com') === -1 && val.indexOf('youtu.be') === -1) {
+                                        window.location.href = val;
+                                    }
                                 }
                             },
                             get href() {
@@ -174,12 +167,16 @@ object AvisoTaskParser {
                             },
                             replace: function(val) {
                                 if (val && val !== 'about:blank') {
-                                    window.location.replace(val);
+                                    if (val.indexOf('youtube.com') === -1 && val.indexOf('youtu.be') === -1) {
+                                        window.location.replace(val);
+                                    }
                                 }
                             },
                             assign: function(val) {
                                 if (val && val !== 'about:blank') {
-                                    window.location.assign(val);
+                                    if (val.indexOf('youtube.com') === -1 && val.indexOf('youtu.be') === -1) {
+                                        window.location.assign(val);
+                                    }
                                 }
                             }
                         },
@@ -190,18 +187,15 @@ object AvisoTaskParser {
                     };
                 };
 
-                // Capture clicks on document: if YouTube link, open in YouTube app!
+                // Capture clicks on document: force target="_self" so video/task never leaves the app
                 document.addEventListener('click', function(e) {
                     var el = e.target;
                     var a = (el && el.tagName === 'A') ? el : (el && el.closest ? el.closest('a') : null);
                     if (a) {
                         var href = (a.getAttribute('href') || '').toLowerCase();
-                        if (href.indexOf('youtube.com') !== -1 || href.indexOf('youtu.be') !== -1 || href.indexOf('vnd.youtube') !== -1) {
+                        if (href.indexOf('youtube.com') !== -1 || href.indexOf('youtu.be') !== -1) {
+                            // Don't redirect top window to YouTube
                             e.preventDefault();
-                            e.stopPropagation();
-                            if (window.AvisoBridge && window.AvisoBridge.openInYouTubeApp) {
-                                window.AvisoBridge.openInYouTubeApp(a.href || href);
-                            }
                             return;
                         }
                         a.removeAttribute('target');
@@ -212,11 +206,8 @@ object AvisoTaskParser {
                 function enforceSelfTarget() {
                     var blankLinks = document.querySelectorAll('a[target="_blank"], a[target="_new"], a[target]');
                     for (var i = 0; i < blankLinks.length; i++) {
-                        var h = (blankLinks[i].getAttribute('href') || '').toLowerCase();
-                        if (h.indexOf('youtube.com') === -1 && h.indexOf('youtu.be') === -1) {
-                            blankLinks[i].target = '_self';
-                            blankLinks[i].removeAttribute('target');
-                        }
+                        blankLinks[i].target = '_self';
+                        blankLinks[i].removeAttribute('target');
                     }
                 }
 
@@ -241,6 +232,9 @@ object AvisoTaskParser {
     const val JS_AUTO_WORK_FIND_AND_CLICK = """
         (function() {
             try {
+                window._avisoVideoPlayTriggered = false;
+                window._avisoVideoPositionReported = false;
+
                 // 1. Enforce same-window navigation
                 window.open = function(url) {
                     if (url && url !== 'about:blank' && url.indexOf('javascript:') === -1) {
@@ -261,13 +255,6 @@ object AvisoTaskParser {
                     var aTag = (el.tagName === 'A') ? el : (el.closest ? el.closest('a') : null);
 
                     var href = (aTag ? aTag.getAttribute('href') : null) || el.getAttribute('href');
-                    if (href && (href.indexOf('youtube.com') !== -1 || href.indexOf('youtu.be') !== -1 || href.indexOf('vnd.youtube') !== -1)) {
-                        if (window.AvisoBridge && window.AvisoBridge.openInYouTubeApp) {
-                            window.AvisoBridge.openInYouTubeApp((aTag ? aTag.href : null) || href);
-                            return true;
-                        }
-                    }
-
                     if (aTag) {
                         aTag.removeAttribute('target');
                         aTag.setAttribute('target', '_self');
@@ -299,7 +286,7 @@ object AvisoTaskParser {
                     }
 
                     if (href && href !== '#' && href.indexOf('javascript:') === -1 &&
-                        (href.indexOf('/vl') !== -1 || href.indexOf('/go/') !== -1 || href.indexOf('create_session') !== -1)) {
+                        (href.indexOf('/vl') !== -1 || href.indexOf('/go/') !== -1 || href.indexOf('create_session') !== -1 || href.indexOf('youtube') !== -1 || href.indexOf('youtu.be') !== -1)) {
                         setTimeout(function() {
                             window.location.href = (aTag ? aTag.href : null) || href;
                         }, 120);
@@ -423,7 +410,7 @@ object AvisoTaskParser {
                         continue;
                     }
 
-                    if (row.style.display === 'none' || row.classList.contains('task-done') || row.classList.contains('completed') || rText.indexOf('Задание выполнено') !== -1 || rText.indexOf('выполнено') !== -1) {
+                    if (row.style.display === 'none' || row.getAttribute('data-completed') === 'true' || row.classList.contains('task-done') || row.classList.contains('completed') || rText.indexOf('Задание выполнено') !== -1 || rText.indexOf('выполнено') !== -1) {
                         continue;
                     }
 
@@ -593,159 +580,39 @@ object AvisoTaskParser {
 
     /**
      * Active watcher script that runs continuously during video viewing:
-     * 1. Detects video player / iframe and triggers playback (playVideo, unmute, video.play()).
-     * 2. Calculates video center position and notifies Android to simulate native touch on YouTube play button.
-     * 3. Reads the real remaining countdown seconds from the Aviso website.
-     * 4. Detects and clicks "Подтвердить просмотр" when timer finishes.
+     * 1. Detects video player / iframe and triggers playback ONCE so it plays continuously without pause interruption.
+     * 2. Scans all frames and documents for Aviso's real countdown timer.
+     * 3. Scans all frames and documents for Aviso's "Подтвердить просмотр" (Confirm View) button.
+     * 4. When countdown reaches 0 and button appears, scrolls it into view and clicks it.
      */
     const val JS_START_AND_WATCH_VIDEO = """
         (function() {
             try {
-                // 1. Check for genuine blocking captcha iframe / widget only
-                var realCaptcha = document.querySelector('iframe[src*="recaptcha/api2/bframe"], iframe[src*="challenges.cloudflare"], #captcha_block, .modal-captcha');
-                if (realCaptcha && realCaptcha.offsetParent !== null && realCaptcha.offsetWidth > 30) {
-                    if (window.AvisoBridge && window.AvisoBridge.onCaptchaFound) {
-                        window.AvisoBridge.onCaptchaFound('ক্যাপচা সমাধান প্রয়োজন');
-                    }
-                    return;
-                }
-
-                var bodyText = (document.body ? document.body.innerText : '') || '';
-                var textLower = bodyText.toLowerCase();
-
-                // 1b. Check and handle "Start Watching" Interstitial Screen if present
-                if (textLower.indexOf('to count your view') !== -1 || textLower.indexOf('please watch the video for at least') !== -1 || textLower.indexOf('start watching') !== -1 || textLower.indexOf('начать просмотр') !== -1 || textLower.indexOf('приступить к просмотру') !== -1) {
-                    var interSec = 0;
-                    var mMS = textLower.match(/(\d+)\s*(?:minute|min|минут)[s]?\s*(?:and\s*)?(\d+)\s*(?:second|sec|секунд)[s]?/i);
-                    if (mMS) {
-                        interSec = (parseInt(mMS[1], 10) || 0) * 60 + (parseInt(mMS[2], 10) || 0);
-                    }
-                    if (interSec === 0) {
-                        var mM = textLower.match(/(\d+)\s*(?:minute|min|минут)[s]?/i);
-                        if (mM) interSec = (parseInt(mM[1], 10) || 0) * 60;
-                    }
-                    if (interSec === 0) {
-                        var mS = textLower.match(/(\d+)\s*(?:second|sec|секунд)[s]?/i);
-                        if (mS) interSec = parseInt(mS[1], 10) || 0;
-                    }
-                    if (interSec <= 0) interSec = 40;
-
-                    var startWatchBtns = document.querySelectorAll('button, a, input[type="button"], div[role="button"], span[role="button"], div, span');
-                    for (var swb = 0; swb < startWatchBtns.length; swb++) {
-                        var swTxt = (startWatchBtns[swb].innerText || startWatchBtns[swb].value || '').trim().toLowerCase();
-                        if (swTxt === 'start watching' || swTxt.indexOf('start watching') !== -1 || swTxt === 'начать просмотр' || swTxt.indexOf('начать просмотр') !== -1 || swTxt.indexOf('приступить к просмотру') !== -1) {
-                            try { startWatchBtns[swb].click(); } catch(e) {}
-                            try { startWatchBtns[swb].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window })); } catch(e) {}
-                            if (window.AvisoBridge && window.AvisoBridge.onInterstitialHandled) {
-                                window.AvisoBridge.onInterstitialHandled(interSec);
-                            }
-                            break;
-                        }
-                    }
-                }
-
-                // 2. Play HTML5 <video> if present
-                var vids = document.querySelectorAll('video');
-                for (var v = 0; v < vids.length; v++) {
+                function getAllDocs() {
+                    var docs = [document];
                     try {
-                        vids[v].muted = false;
-                        if (vids[v].paused) {
-                            vids[v].play().catch(function(e){});
+                        for (var f = 0; f < window.frames.length; f++) {
+                            try {
+                                if (window.frames[f] && window.frames[f].document) {
+                                    docs.push(window.frames[f].document);
+                                }
+                            } catch(e) {}
                         }
                     } catch(e) {}
-                }
-
-                // 3. YouTube Iframes & Overlays
-                var iframes = document.querySelectorAll('iframe[src*="youtube"], iframe[src*="youtu.be"], iframe#video-click, iframe');
-                for (var f = 0; f < iframes.length; f++) {
-                    var ifr = iframes[f];
                     try {
-                        ifr.contentWindow.postMessage('{"event":"command","func":"playVideo","args":""}', '*');
-                        ifr.contentWindow.postMessage('{"event":"command","func":"unMute","args":""}', '*');
-                    } catch(e) {}
-
-                    // Report video bounding box for native Android touch simulation
-                    try {
-                        var rect = ifr.getBoundingClientRect();
-                        if (rect.width > 60 && rect.height > 60 && rect.top >= 0) {
-                            var d = window.devicePixelRatio || 1.0;
-                            var cx = (rect.left + rect.width / 2.0) * d;
-                            var cy = (rect.top + rect.height / 2.0) * d;
-                            if (window.AvisoBridge && window.AvisoBridge.onVideoPositionFound) {
-                                window.AvisoBridge.onVideoPositionFound(cx, cy);
-                            }
+                        var ifrs = document.querySelectorAll('iframe, frame');
+                        for (var i = 0; i < ifrs.length; i++) {
+                            try {
+                                var doc = ifrs[i].contentDocument || (ifrs[i].contentWindow && ifrs[i].contentWindow.document);
+                                if (doc && docs.indexOf(doc) === -1) {
+                                    docs.push(doc);
+                                }
+                            } catch(e) {}
                         }
                     } catch(e) {}
+                    return docs;
                 }
 
-                // Click Aviso overlay buttons for starting video if present
-                var startButtons = document.querySelectorAll('#video-click, .video-click, #start_video, .start-video, .ytp-large-play-button, .ytp-play-button, button.btn-play, [class*="play_btn"], a[onclick*="start"], button[onclick*="start"]');
-                for (var s = 0; s < startButtons.length; s++) {
-                    try {
-                        startButtons[s].click();
-                    } catch(e) {}
-                }
-
-                // 4. Read Real Aviso Countdown Timer
-                var realSec = -1;
-                var timerEls = document.querySelectorAll('#tmr, #timer, .timer, #sec, span[id*="tmr"], span[id*="time"], div[id*="timer"], .time_block, .time-count');
-                for (var t = 0; t < timerEls.length; t++) {
-                    var txt = (timerEls[t].innerText || '').trim();
-                    var m = txt.match(/(\d+)/);
-                    if (m) {
-                        realSec = parseInt(m[1], 10);
-                        break;
-                    }
-                }
-                if (realSec === -1) {
-                    var m2 = bodyText.match(/Осталось:\s*(\d+)\s*сек/i) || bodyText.match(/(\d+)\s*сек(?:унд)?/i);
-                    if (m2) {
-                        realSec = parseInt(m2[1], 10);
-                    }
-                }
-                if (window.AvisoBridge && window.AvisoBridge.onRealTimerUpdate) {
-                    window.AvisoBridge.onRealTimerUpdate(realSec);
-                }
-
-                // 5. Check for "Подтвердить просмотр" (Confirm View) or "Забрать награду"
-                var confirmBtns = document.querySelectorAll('button, a, input[type="button"], span, div');
-                for (var cb = 0; cb < confirmBtns.length; cb++) {
-                    var cEl = confirmBtns[cb];
-                    var cTxt = (cEl.innerText || cEl.value || '').trim();
-                    if (cTxt.indexOf('Подтвердить просмотр') !== -1 || cTxt.indexOf('Забрать') !== -1 || cTxt.indexOf('Получить') !== -1 || cTxt.indexOf('Подтвердить') !== -1) {
-                        if (cEl.offsetParent !== null) {
-                            cEl.click();
-                            if (window.AvisoBridge && window.AvisoBridge.onTaskCompleted) {
-                                window.AvisoBridge.onTaskCompleted();
-                            }
-                            return;
-                        }
-                    }
-                }
-
-                // 6. Check if task completed text is shown
-                if (bodyText.indexOf('засчитан') !== -1 || bodyText.indexOf('начислено') !== -1 || bodyText.indexOf('получили') !== -1) {
-                    if (window.AvisoBridge && window.AvisoBridge.onTaskCompleted) {
-                        window.AvisoBridge.onTaskCompleted();
-                    }
-                }
-            } catch(e) {
-                if (window.AvisoBridge && window.AvisoBridge.onError) {
-                    window.AvisoBridge.onError('Watch video error: ' + e.toString());
-                }
-            }
-        })();
-    """
-
-    /**
-     * Clicks "Подтвердить просмотр" (Confirm view), "Проверить" (Check/Verify), or "Подтвердить" button:
-     * - First scrolls to and checks inside window._avisoLastTaskRow (returning to the exact task in Aviso).
-     * - Checks all global elements for confirmation buttons with full mouse event dispatch.
-     * - Reports success to Kotlin bridge.
-     */
-    const val JS_AUTO_WORK_CLICK_CONFIRM = """
-        (function() {
-            try {
                 function safeClick(el) {
                     if (!el) return false;
                     try { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch(e) {}
@@ -802,6 +669,248 @@ object AvisoTaskParser {
                         oc.indexOf('check_task') !== -1 ||
                         oc.indexOf('check_adv') !== -1 ||
                         id.indexOf('confirm') !== -1 ||
+                        id.indexOf('btn_check') !== -1 ||
+                        id.indexOf('check') !== -1) {
+                        return true;
+                    }
+                    return false;
+                }
+
+                // 1. Check for genuine blocking captcha iframe / widget only
+                var realCaptcha = document.querySelector('iframe[src*="recaptcha/api2/bframe"], iframe[src*="challenges.cloudflare"], #captcha_block, .modal-captcha');
+                if (realCaptcha && realCaptcha.offsetParent !== null && realCaptcha.offsetWidth > 30) {
+                    if (window.AvisoBridge && window.AvisoBridge.onCaptchaFound) {
+                        window.AvisoBridge.onCaptchaFound('ক্যাপচা সমাধান প্রয়োজন');
+                    }
+                    return;
+                }
+
+                var docs = getAllDocs();
+                var combinedBodyText = '';
+                for (var d = 0; d < docs.length; d++) {
+                    try {
+                        combinedBodyText += ' ' + ((docs[d].body ? docs[d].body.innerText : '') || '');
+                    } catch(e) {}
+                }
+                var textLower = combinedBodyText.toLowerCase();
+
+                // 1b. Check and handle "Start Watching" Interstitial Screen if present
+                if (textLower.indexOf('to count your view') !== -1 || textLower.indexOf('please watch the video for at least') !== -1 || textLower.indexOf('start watching') !== -1 || textLower.indexOf('начать просмотр') !== -1 || textLower.indexOf('приступить к просмотру') !== -1) {
+                    var interSec = 0;
+                    var mMS = textLower.match(/(\d+)\s*(?:minute|min|минут)[s]?\s*(?:and\s*)?(\d+)\s*(?:second|sec|секунд)[s]?/i);
+                    if (mMS) {
+                        interSec = (parseInt(mMS[1], 10) || 0) * 60 + (parseInt(mMS[2], 10) || 0);
+                    }
+                    if (interSec === 0) {
+                        var mM = textLower.match(/(\d+)\s*(?:minute|min|минут)[s]?/i);
+                        if (mM) interSec = (parseInt(mM[1], 10) || 0) * 60;
+                    }
+                    if (interSec === 0) {
+                        var mS = textLower.match(/(\d+)\s*(?:second|sec|секунд)[s]?/i);
+                        if (mS) interSec = parseInt(mS[1], 10) || 0;
+                    }
+                    if (interSec <= 0) interSec = 40;
+
+                    for (var d0 = 0; d0 < docs.length; d0++) {
+                        var startWatchBtns = docs[d0].querySelectorAll('button, a, input[type="button"], div[role="button"], span[role="button"], div, span');
+                        for (var swb = 0; swb < startWatchBtns.length; swb++) {
+                            var swTxt = (startWatchBtns[swb].innerText || startWatchBtns[swb].value || '').trim().toLowerCase();
+                            if (swTxt === 'start watching' || swTxt.indexOf('start watching') !== -1 || swTxt === 'начать просмотр' || swTxt.indexOf('начать просмотр') !== -1 || swTxt.indexOf('приступить к просмотру') !== -1) {
+                                safeClick(startWatchBtns[swb]);
+                                if (window.AvisoBridge && window.AvisoBridge.onInterstitialHandled) {
+                                    window.AvisoBridge.onInterstitialHandled(interSec);
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                // 2. Play HTML5 <video> if present and currently paused
+                for (var d1 = 0; d1 < docs.length; d1++) {
+                    var vids = docs[d1].querySelectorAll('video');
+                    for (var v = 0; v < vids.length; v++) {
+                        try {
+                            vids[v].muted = false;
+                            if (vids[v].paused) {
+                                vids[v].play().catch(function(e){});
+                            }
+                        } catch(e) {}
+                    }
+                }
+
+                // 3. YouTube Iframes: Trigger playback ONCE so it plays smoothly without repeated toggles
+                if (!window._avisoVideoPlayTriggered) {
+                    window._avisoVideoPlayTriggered = true;
+                    var iframes = document.querySelectorAll('iframe[src*="youtube"], iframe[src*="youtu.be"], iframe#video-click, iframe');
+                    for (var f = 0; f < iframes.length; f++) {
+                        var ifr = iframes[f];
+                        try {
+                            ifr.contentWindow.postMessage('{"event":"command","func":"playVideo","args":""}', '*');
+                            ifr.contentWindow.postMessage('{"event":"command","func":"unMute","args":""}', '*');
+                        } catch(e) {}
+                    }
+
+                    // Click initial play overlay once
+                    var startButtons = document.querySelectorAll('#video-click, .video-click, #start_video, .start-video, .ytp-large-play-button, button.btn-play, [class*="play_btn"], a[onclick*="start"], button[onclick*="start"]');
+                    for (var s = 0; s < startButtons.length; s++) {
+                        try {
+                            startButtons[s].click();
+                        } catch(e) {}
+                    }
+                }
+
+                // 4. Read Real Aviso Countdown Timer across all frames
+                var realSec = -1;
+                for (var d2 = 0; d2 < docs.length; d2++) {
+                    var curDoc = docs[d2];
+                    var timerEls = curDoc.querySelectorAll('#tmr, #timer, .timer, #sec, span[id*="tmr"], span[id*="time"], div[id*="timer"], .time_block, .time-count');
+                    for (var t = 0; t < timerEls.length; t++) {
+                        var txt = (timerEls[t].innerText || '').trim();
+                        var m = txt.match(/(\d+)/);
+                        if (m) {
+                            realSec = parseInt(m[1], 10);
+                            break;
+                        }
+                    }
+                    if (realSec !== -1) break;
+                    var bTxt = (curDoc.body ? curDoc.body.innerText : '') || '';
+                    var m2 = bTxt.match(/Осталось:\s*(\d+)\s*сек/i) || bTxt.match(/(\d+)\s*сек(?:унд)?/i) || bTxt.match(/(\d+)\s*sec/i);
+                    if (m2) {
+                        realSec = parseInt(m2[1], 10);
+                        break;
+                    }
+                }
+
+                if (window.AvisoBridge && window.AvisoBridge.onRealTimerUpdate) {
+                    window.AvisoBridge.onRealTimerUpdate(realSec);
+                }
+
+                // 5. Check for "Подтвердить просмотр" (Confirm View) or "Забрать награду" across all frames
+                for (var d3 = 0; d3 < docs.length; d3++) {
+                    var cDoc = docs[d3];
+                    var confirmBtns = cDoc.querySelectorAll('#btn_check, .btn_confirm, [id*="confirm"], [id*="check"], button, a, input[type="button"], span, div');
+                    for (var cb = 0; cb < confirmBtns.length; cb++) {
+                        var cEl = confirmBtns[cb];
+                        if (isConfirmBtn(cEl)) {
+                            // Scroll button into clear view for user
+                            try { cEl.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch(e) {}
+                            // If countdown is finished, trigger click
+                            if (realSec <= 0 && cEl.offsetParent !== null) {
+                                safeClick(cEl);
+                                if (window.AvisoBridge && window.AvisoBridge.onTaskCompleted) {
+                                    window.AvisoBridge.onTaskCompleted();
+                                }
+                                return;
+                            }
+                        }
+                    }
+                }
+
+                // 6. Check if task completed text is shown across all frames
+                if (textLower.indexOf('засчитан') !== -1 || textLower.indexOf('начислено') !== -1 || textLower.indexOf('получили') !== -1) {
+                    if (window.AvisoBridge && window.AvisoBridge.onTaskCompleted) {
+                        window.AvisoBridge.onTaskCompleted();
+                    }
+                }
+            } catch(e) {
+                if (window.AvisoBridge && window.AvisoBridge.onError) {
+                    window.AvisoBridge.onError('Watch video error: ' + e.toString());
+                }
+            }
+        })();
+    """
+
+    /**
+     * Clicks "Подтвердить просмотр" (Confirm view), "Проверить" (Check/Verify), or "Подтвердить" button:
+     * - Checks all frames and documents with full event dispatch.
+     * - Reports success to Kotlin bridge.
+     */
+    const val JS_AUTO_WORK_CLICK_CONFIRM = """
+        (function() {
+            try {
+                function getAllDocs() {
+                    var docs = [document];
+                    try {
+                        for (var f = 0; f < window.frames.length; f++) {
+                            try {
+                                if (window.frames[f] && window.frames[f].document) {
+                                    docs.push(window.frames[f].document);
+                                }
+                            } catch(e) {}
+                        }
+                    } catch(e) {}
+                    try {
+                        var ifrs = document.querySelectorAll('iframe, frame');
+                        for (var i = 0; i < ifrs.length; i++) {
+                            try {
+                                var doc = ifrs[i].contentDocument || (ifrs[i].contentWindow && ifrs[i].contentWindow.document);
+                                if (doc && docs.indexOf(doc) === -1) {
+                                    docs.push(doc);
+                                }
+                            } catch(e) {}
+                        }
+                    } catch(e) {}
+                    return docs;
+                }
+
+                function safeClick(el) {
+                    if (!el) return false;
+                    try { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch(e) {}
+                    try { el.focus(); } catch(e) {}
+                    try {
+                        var rect = el.getBoundingClientRect();
+                        var cx = rect.left + rect.width / 2;
+                        var cy = rect.top + rect.height / 2;
+                        var mdown = new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy });
+                        var mup = new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy });
+                        var mclick = new MouseEvent('click', { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy });
+                        el.dispatchEvent(mdown);
+                        el.dispatchEvent(mup);
+                        el.dispatchEvent(mclick);
+                    } catch(e) {}
+                    try { el.click(); } catch(e) {}
+                    if (el.getAttribute && el.getAttribute('onclick')) {
+                        try {
+                            var fn = new Function(el.getAttribute('onclick'));
+                            fn.call(el);
+                        } catch(e) {}
+                    }
+                    return true;
+                }
+
+                function isConfirmBtn(el) {
+                    if (!el) return false;
+                    var t = (el.innerText || el.value || '').trim().toLowerCase();
+                    var cls = (el.className || '').toString().toLowerCase();
+                    var oc = (el.getAttribute('onclick') || '').toLowerCase();
+                    var id = (el.id || '').toLowerCase();
+
+                    if (!t && !cls && !oc && !id) return false;
+
+                    if (t.indexOf('подтвердить просмотр') !== -1 ||
+                        t.indexOf('подтвердить') !== -1 ||
+                        t.indexOf('проверить выполнение') !== -1 ||
+                        t.indexOf('проверить') !== -1 ||
+                        t.indexOf('забрать') !== -1 ||
+                        t.indexOf('получить вознаграждение') !== -1 ||
+                        t.indexOf('получить награду') !== -1 ||
+                        t.indexOf('получить') !== -1 ||
+                        t.indexOf('confirm view') !== -1 ||
+                        t.indexOf('confirm') !== -1 ||
+                        t.indexOf('verify') !== -1 ||
+                        t.indexOf('claim') !== -1) {
+                        return true;
+                    }
+
+                    if (cls.indexOf('btn_confirm') !== -1 ||
+                        cls.indexOf('btn_check') !== -1 ||
+                        cls.indexOf('confirm-btn') !== -1 ||
+                        oc.indexOf('confirm') !== -1 ||
+                        oc.indexOf('check_task') !== -1 ||
+                        oc.indexOf('check_adv') !== -1 ||
+                        id.indexOf('confirm') !== -1 ||
+                        id.indexOf('btn_check') !== -1 ||
                         id.indexOf('check') !== -1) {
                         return true;
                     }
@@ -809,8 +918,9 @@ object AvisoTaskParser {
                 }
 
                 var clicked = false;
+                var docs = getAllDocs();
 
-                // 1. First check inside the saved active task row!
+                // 1. First check inside the saved active task row if present on tasks-youtube!
                 if (window._avisoLastTaskRow && document.body.contains(window._avisoLastTaskRow)) {
                     var row = window._avisoLastTaskRow;
                     try { row.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch(e) {}
@@ -824,17 +934,28 @@ object AvisoTaskParser {
                     }
                 }
 
-                // 2. Global search on the page
+                // 2. Global search across all documents and frames
                 if (!clicked) {
-                    var allCandidates = document.querySelectorAll('button, a, input[type="button"], span[role="button"], div[role="button"], span, div');
-                    for (var i = 0; i < allCandidates.length; i++) {
-                        var el = allCandidates[i];
-                        if (isConfirmBtn(el)) {
-                            safeClick(el);
-                            clicked = true;
-                            break;
+                    for (var d = 0; d < docs.length; d++) {
+                        var allCandidates = docs[d].querySelectorAll('#btn_check, .btn_confirm, [id*="confirm"], [id*="check"], button, a, input[type="button"], span[role="button"], div[role="button"], span, div');
+                        for (var i = 0; i < allCandidates.length; i++) {
+                            var el = allCandidates[i];
+                            if (isConfirmBtn(el) && el.offsetParent !== null) {
+                                safeClick(el);
+                                clicked = true;
+                                break;
+                            }
                         }
+                        if (clicked) break;
                     }
+                }
+
+                if (clicked && window._avisoLastTaskRow) {
+                    try {
+                        window._avisoLastTaskRow.classList.add('task-done');
+                        window._avisoLastTaskRow.setAttribute('data-completed', 'true');
+                        window._avisoLastTaskRow.style.opacity = '0.4';
+                    } catch(e) {}
                 }
 
                 if (window.AvisoBridge && window.AvisoBridge.onAutoWorkConfirmClicked) {

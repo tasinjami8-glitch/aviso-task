@@ -454,6 +454,74 @@ fun AvisoSidebar(
                                 }
                             }
                         }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // Current Session Task Counts Summary
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            color = MaterialTheme.colorScheme.surface,
+                            shape = RoundedCornerShape(8.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            Icons.Default.CheckCircle,
+                                            contentDescription = null,
+                                            tint = Color(0xFF10B981),
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            "সফল: ${uiState.successfulTasksCount}",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFF047857)
+                                        )
+                                    }
+
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            Icons.Default.Close,
+                                            contentDescription = null,
+                                            tint = Color(0xFFEF4444),
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            "ব্যর্থ: ${uiState.failedTasksCount}",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFFDC2626)
+                                        )
+                                    }
+                                }
+
+                                if (uiState.successfulTasksCount > 0 || uiState.failedTasksCount > 0) {
+                                    Text(
+                                        text = "রিসেট",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .clickable { viewModel.resetTaskCounts() }
+                                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -663,22 +731,213 @@ fun AvisoSidebar(
                             Text("টেস্ট নোটিফিকেশন পাঠান", fontSize = 12.sp)
                         }
 
+                        Spacer(modifier = Modifier.height(14.dp))
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // App Permissions Section Header
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Settings,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "প্রয়োজনীয় সকল পারমিশন ও স্ট্যাটাস",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
                         Spacer(modifier = Modifier.height(8.dp))
 
-                        // App Notification Permission Button (Explicit user requirement)
+                        // 1. Overlay Permission (Display over other apps)
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            color = MaterialTheme.colorScheme.surface,
+                            shape = RoundedCornerShape(8.dp),
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp,
+                                if (uiState.isOverlayPermissionGranted) Color(0xFF10B981).copy(alpha = 0.4f) else Color(0xFFF59E0B).copy(alpha = 0.5f)
+                            )
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        "অন্যান্য অ্যাপের উপর প্রদর্শন (Overlay)",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Surface(
+                                        color = if (uiState.isOverlayPermissionGranted) Color(0xFFD1FAE5) else Color(0xFFFEF3C7),
+                                        shape = RoundedCornerShape(4.dp)
+                                    ) {
+                                        Text(
+                                            text = if (uiState.isOverlayPermissionGranted) "সক্রিয় ✓" else "অনুমতি দিন ⚠️",
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (uiState.isOverlayPermissionGranted) Color(0xFF047857) else Color(0xFFB45309),
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    "YouTube অ্যাপে ভিডিও শেষে স্বয়ংক্রিয়ভাবে Aviso অ্যাপে ফিরে এসে 'Подтвердить просмотр' কনফার্ম করতে এই পারমিশন আবশ্যক।",
+                                    fontSize = 10.sp,
+                                    color = MaterialTheme.colorScheme.outline,
+                                    lineHeight = 13.sp
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                OutlinedButton(
+                                    onClick = { viewModel.requestOverlayPermission(context) },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(34.dp)
+                                        .testTag("request_overlay_permission_button")
+                                ) {
+                                    Text("ওভারলে (Display Over) পারমিশন দিন", fontSize = 11.sp)
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // 2. Battery Optimization Exemption
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            color = MaterialTheme.colorScheme.surface,
+                            shape = RoundedCornerShape(8.dp),
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp,
+                                if (uiState.isBatteryOptimizationExempted) Color(0xFF10B981).copy(alpha = 0.4f) else Color(0xFFF59E0B).copy(alpha = 0.5f)
+                            )
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        "ব্যাটারি অপ্টিমাইজেশন ছাড় (Battery Saver)",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Surface(
+                                        color = if (uiState.isBatteryOptimizationExempted) Color(0xFFD1FAE5) else Color(0xFFFEF3C7),
+                                        shape = RoundedCornerShape(4.dp)
+                                    ) {
+                                        Text(
+                                            text = if (uiState.isBatteryOptimizationExempted) "মুক্ত ✓" else "ছাড় দিন ⚠️",
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (uiState.isBatteryOptimizationExempted) Color(0xFF047857) else Color(0xFFB45309),
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    "স্ক্রিন অফ বা ব্যাকগ্রাউন্ডে কাজ চলাকালীন ফোন সিস্টেম যাতে অটো-ওয়ার্কার বা সার্ভিসের টাইমার বন্ধ না করে।",
+                                    fontSize = 10.sp,
+                                    color = MaterialTheme.colorScheme.outline,
+                                    lineHeight = 13.sp
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                OutlinedButton(
+                                    onClick = { viewModel.requestBatteryOptimizationExemption(context) },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(34.dp)
+                                        .testTag("request_battery_exemption_button")
+                                ) {
+                                    Text("ব্যাটারি অপ্টিমাইজেশন ছাড় দিন", fontSize = 11.sp)
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // 3. Notification Permission & Full App Settings
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            color = MaterialTheme.colorScheme.surface,
+                            shape = RoundedCornerShape(8.dp),
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp,
+                                if (uiState.isNotificationGranted) Color(0xFF10B981).copy(alpha = 0.4f) else Color(0xFFF59E0B).copy(alpha = 0.5f)
+                            )
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        "নোটিফিকেশন পারমিশন (Notification)",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Surface(
+                                        color = if (uiState.isNotificationGranted) Color(0xFFD1FAE5) else Color(0xFFFEF3C7),
+                                        shape = RoundedCornerShape(4.dp)
+                                    ) {
+                                        Text(
+                                            text = if (uiState.isNotificationGranted) "অনুমোদিত ✓" else "অনুমতি দিন ⚠️",
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (uiState.isNotificationGranted) Color(0xFF047857) else Color(0xFFB45309),
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    "কাজের কাউন্টডাউন প্রগ্রেস এবং নতুন কাজ আসার অ্যালার্ট সাউন্ড পাওয়ার জন্য প্রয়োজন।",
+                                    fontSize = 10.sp,
+                                    color = MaterialTheme.colorScheme.outline,
+                                    lineHeight = 13.sp
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                OutlinedButton(
+                                    onClick = { viewModel.openAppNotificationSettings(context) },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(34.dp)
+                                        .testTag("open_notification_settings_button")
+                                ) {
+                                    Text("নোটিফিকেশন পারমিশন সেটিংস", fontSize = 11.sp)
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // Full App Info Settings Button
                         Button(
-                            onClick = { viewModel.openAppNotificationSettings(context) },
+                            onClick = { viewModel.openAppSettings(context) },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(42.dp)
-                                .testTag("open_app_settings_button"),
+                                .height(40.dp)
+                                .testTag("open_full_app_settings_button"),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = MaterialTheme.colorScheme.secondary
                             )
                         ) {
                             Icon(Icons.Default.Settings, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("ফোনের App Settings-এ পারমিশন দিন", fontSize = 12.sp)
+                            Text("ফোনের সম্পূর্ণ App Settings খুলুন", fontSize = 12.sp)
                         }
                     }
                 }

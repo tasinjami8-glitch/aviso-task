@@ -411,4 +411,81 @@ object AvisoNotificationHelper {
             isNewDetected = true
         )
     }
+
+    private const val NOTIFICATION_ID_AUTOWORK_PROGRESS = 1004
+
+    /**
+     * Shows a live countdown progress notification while Auto Work is viewing a video.
+     * Enables user to leave app or view YouTube app while keeping track of the countdown.
+     */
+    fun showAutoWorkProgressNotification(context: Context, remainingSec: Int, totalSec: Int) {
+        try {
+            val notificationManager = NotificationManagerCompat.from(context)
+            val openIntent = Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            }
+            val pendingIntent = PendingIntent.getActivity(
+                context,
+                11,
+                openIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            val progressPercent = if (totalSec > 0) ((totalSec - remainingSec) * 100 / totalSec).coerceIn(0, 100) else 0
+
+            val notification = NotificationCompat.Builder(context, CHANNEL_TASKS_SILENT_ID)
+                .setSmallIcon(R.drawable.ic_launcher_foreground)
+                .setContentTitle("অটো-ওয়ার্ক ভিডিও দেখা হচ্ছে ($remainingSec সেক বাকি)")
+                .setContentText("মোট সময়: $totalSec সেকেন্ড | অ্যাপের বাইরে গেলেও কাউন্টডাউন চলছে...")
+                .setProgress(100, progressPercent, false)
+                .setOngoing(true)
+                .setOnlyAlertOnce(true)
+                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                .setContentIntent(pendingIntent)
+                .build()
+
+            notificationManager.notify(NOTIFICATION_ID_AUTOWORK_PROGRESS, notification)
+        } catch (_: Exception) {}
+    }
+
+    /**
+     * Cancels the live countdown progress notification.
+     */
+    fun cancelAutoWorkProgressNotification(context: Context) {
+        try {
+            val notificationManager = NotificationManagerCompat.from(context)
+            notificationManager.cancel(NOTIFICATION_ID_AUTOWORK_PROGRESS)
+        } catch (_: Exception) {}
+    }
+
+    /**
+     * Sends a completion notification with high priority & sound when video watching finishes.
+     */
+    fun sendAutoWorkFinishedNotification(context: Context) {
+        cancelAutoWorkProgressNotification(context)
+        try {
+            val notificationManager = NotificationManagerCompat.from(context)
+            val openIntent = Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            }
+            val pendingIntent = PendingIntent.getActivity(
+                context,
+                12,
+                openIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            val notification = NotificationCompat.Builder(context, CHANNEL_TASKS_ID)
+                .setSmallIcon(R.drawable.ic_launcher_foreground)
+                .setContentTitle("কাউন্টডাউন শেষ! কনফার্ম করা হচ্ছে...")
+                .setContentText("ভিডিও দেখা শেষ! Aviso-তে টাস্ক কনফার্ম (Confirm View) করা হচ্ছে।")
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setAutoCancel(true)
+                .setFullScreenIntent(pendingIntent, true)
+                .setContentIntent(pendingIntent)
+                .build()
+
+            notificationManager.notify(NOTIFICATION_ID_TASK_FINISH, notification)
+        } catch (_: Exception) {}
+    }
 }

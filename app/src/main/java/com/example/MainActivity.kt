@@ -32,6 +32,7 @@ class MainActivity : ComponentActivity() {
         AvisoNotificationHelper.createNotificationChannels(this)
 
         handleIntent(intent)
+        viewModel.refreshPermissions(this)
 
         setContent {
             MyApplicationTheme {
@@ -63,6 +64,11 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        viewModel.refreshPermissions(this)
     }
 
     override fun onNewIntent(intent: Intent) {

@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.model.TaskScanResult
 import com.example.service.AvisoTaskMonitorService
 import com.example.util.AvisoNotificationHelper
+import com.example.util.AvisoPermissionHelper
 import com.example.util.AvisoTaskParser
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -35,6 +36,11 @@ data class AvisoUiState(
     val autoWorkTotalSeconds: Int = 0,
     val autoWorkStatus: String = "",
     val autoWorkTaskTitle: String = "",
+    val successfulTasksCount: Int = 0,
+    val failedTasksCount: Int = 0,
+    val isOverlayPermissionGranted: Boolean = false,
+    val isBatteryOptimizationExempted: Boolean = false,
+    val isNotificationGranted: Boolean = true,
     val captchaDetectedAlert: String? = null
 )
 
@@ -251,5 +257,39 @@ class AvisoViewModel : ViewModel() {
 
     fun dismissCaptchaAlert() {
         _uiState.update { it.copy(captchaDetectedAlert = null) }
+    }
+
+    fun incrementSuccessCount() {
+        _uiState.update { it.copy(successfulTasksCount = it.successfulTasksCount + 1) }
+    }
+
+    fun incrementFailedCount() {
+        _uiState.update { it.copy(failedTasksCount = it.failedTasksCount + 1) }
+    }
+
+    fun resetTaskCounts() {
+        _uiState.update { it.copy(successfulTasksCount = 0, failedTasksCount = 0) }
+    }
+
+    fun refreshPermissions(context: Context) {
+        _uiState.update {
+            it.copy(
+                isOverlayPermissionGranted = AvisoPermissionHelper.canDrawOverlays(context),
+                isBatteryOptimizationExempted = AvisoPermissionHelper.isIgnoringBatteryOptimizations(context),
+                isNotificationGranted = AvisoPermissionHelper.isNotificationPermissionGranted(context)
+            )
+        }
+    }
+
+    fun requestOverlayPermission(context: Context) {
+        AvisoPermissionHelper.requestOverlayPermission(context)
+    }
+
+    fun requestBatteryOptimizationExemption(context: Context) {
+        AvisoPermissionHelper.requestIgnoreBatteryOptimizations(context)
+    }
+
+    fun openAppSettings(context: Context) {
+        AvisoPermissionHelper.openAppSettings(context)
     }
 }

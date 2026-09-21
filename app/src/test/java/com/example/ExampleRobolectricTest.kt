@@ -45,4 +45,15 @@ class ExampleRobolectricTest {
     assertEquals("tasinjami8", result.username)
     assertEquals(1, result.tasks.size)
   }
+
+  @Test
+  fun `test AvisoPermissionHelper methods do not crash`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val hasOverlay = com.example.util.AvisoPermissionHelper.canDrawOverlays(context)
+    val hasBattery = com.example.util.AvisoPermissionHelper.isIgnoringBatteryOptimizations(context)
+    val hasNotif = com.example.util.AvisoPermissionHelper.isNotificationPermissionGranted(context)
+    assertNotNull(hasOverlay)
+    assertNotNull(hasBattery)
+    assertNotNull(hasNotif)
+  }
 }

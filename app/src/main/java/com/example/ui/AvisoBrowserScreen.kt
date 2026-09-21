@@ -16,6 +16,7 @@ import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
 import android.webkit.SslErrorHandler
+import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
@@ -23,6 +24,9 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import com.example.util.AvisoPermissionHelper
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -49,7 +53,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Cancel
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.MenuOpen
 import androidx.compose.material.icons.filled.PlayArrow
@@ -264,7 +271,8 @@ fun AvisoBrowserScreen(
     }
 
     // Connect WebView to Android lifecycle to properly pause/resume audio & js threads
-    DisposableEffect(lifecycleOwner, webViewRef) {
+    // IMPORTANT: When isAutoWorkRunning is true, NEVER pause timers so countdown and execution continue
+    DisposableEffect(lifecycleOwner, webViewRef, uiState.isAutoWorkRunning) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_RESUME -> {
@@ -272,8 +280,10 @@ fun AvisoBrowserScreen(
                     webViewRef?.resumeTimers()
                 }
                 Lifecycle.Event.ON_PAUSE -> {
-                    webViewRef?.pauseTimers()
-                    webViewRef?.onPause()
+                    if (!uiState.isAutoWorkRunning) {
+                        webViewRef?.pauseTimers()
+                        webViewRef?.onPause()
+                    }
                 }
                 else -> Unit
             }
@@ -339,9 +349,22 @@ fun AvisoBrowserScreen(
     var autoWorkNoTasksSignal by remember { mutableStateOf(false) }
     var realTimerSecondsSignal by remember { mutableStateOf(-1) }
     var taskCompletedSignal by remember { mutableStateOf(false) }
+    var confirmClickedSignal by remember { mutableStateOf(false) }
+    var didReloadForTasks by remember { mutableStateOf(false) }
     var realInterstitialDurationSignal by remember { mutableStateOf<Int?>(null) }
     var manualWatchCountdown by remember { mutableStateOf<Int?>(null) }
     var manualWatchTotal by remember { mutableStateOf<Int?>(null) }
+    var showOverlayPromptDialog by remember { mutableStateOf(false) }
+    var didDismissOverlayPrompt by remember { mutableStateOf(false) }
+
+    var fileUploadCallback by remember { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
+    val fileChooserLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val uris = WebChromeClient.FileChooserParams.parseResult(result.resultCode, result.data)
+        fileUploadCallback?.onReceiveValue(uris)
+        fileUploadCallback = null
+    }
 
     // Manual watching countdown loop (when user clicks blue link manually and interstitial appears)
     LaunchedEffect(manualWatchTotal) {
@@ -368,7 +391,10 @@ fun AvisoBrowserScreen(
 
     // Auto Work Execution Engine
     LaunchedEffect(uiState.isAutoWorkRunning) {
-        if (!uiState.isAutoWorkRunning) return@LaunchedEffect
+        if (!uiState.isAutoWorkRunning) {
+            AvisoNotificationHelper.cancelAutoWorkProgressNotification(context)
+            return@LaunchedEffect
+        }
 
         // Navigate to YouTube tasks page if not already there
         if (webViewRef?.url?.contains("tasks-youtube") != true) {
@@ -382,6 +408,7 @@ fun AvisoBrowserScreen(
             autoWorkNoTasksSignal = false
             realTimerSecondsSignal = -1
             taskCompletedSignal = false
+            confirmClickedSignal = false
             realInterstitialDurationSignal = null
 
             // Step 1: Find next video task & click task link
@@ -401,14 +428,23 @@ fun AvisoBrowserScreen(
 
             if (!uiState.isAutoWorkRunning) break
 
-            // If no tasks are available
+            // If no tasks are currently detected on page, attempt one reload to see if new tasks appeared
             if (autoWorkNoTasksSignal) {
-                viewModel.setAutoWorkStatus("বর্তমানে কোনো কাজ নেই!")
-                AvisoNotificationHelper.sendNoTasksNotification(context, wasCompleted = true)
-                viewModel.stopAutoWork("সব কাজ শেষ হয়েছে!")
-                Toast.makeText(context, "সবগুলো YouTube কাজ সফলভাবে সম্পন্ন হয়েছে!", Toast.LENGTH_LONG).show()
-                break
+                if (!didReloadForTasks) {
+                    didReloadForTasks = true
+                    viewModel.setAutoWorkStatus("নতুন কাজ চেক করতে পেজ রিফ্রেশ হচ্ছে...")
+                    webViewRef?.loadUrl("https://aviso.bz/tasks-youtube")
+                    delay(3500L)
+                    continue
+                } else {
+                    viewModel.setAutoWorkStatus("বর্তমানে কোনো কাজ নেই!")
+                    AvisoNotificationHelper.sendNoTasksNotification(context, wasCompleted = true)
+                    viewModel.stopAutoWork("সব কাজ শেষ হয়েছে!")
+                    Toast.makeText(context, "সবগুলো YouTube কাজ সম্পন্ন হয়েছে!", Toast.LENGTH_LONG).show()
+                    break
+                }
             }
+            didReloadForTasks = false
 
             // Check if navigation happened or task started signal was received
             val currentUrlAfterClick = webViewRef?.url.orEmpty()
@@ -426,7 +462,7 @@ fun AvisoBrowserScreen(
             if (!isStarted) {
                 viewModel.setAutoWorkStatus("কাজ শুরু হয়নি, পুনরায় চেষ্টা করা হচ্ছে...")
                 webViewRef?.evaluateJavascript(AvisoTaskParser.JS_AUTO_WORK_FIND_AND_CLICK, null)
-                delay(2000L)
+                delay(2500L)
                 val retryUrl = webViewRef?.url.orEmpty()
                 val retryNav = !retryUrl.contains("tasks-youtube") ||
                         retryUrl.contains("/go/") ||
@@ -434,6 +470,8 @@ fun AvisoBrowserScreen(
                         retryUrl.contains("youtube") ||
                         retryUrl.contains("create_session")
                 if (autoWorkTaskStartedSignal == null && !retryNav) {
+                    viewModel.incrementFailedCount()
+                    viewModel.setAutoWorkStatus("টাস্ক শুরু ব্যর্থ হয়েছে (ব্যর্থ: ${uiState.failedTasksCount + 1})")
                     webViewRef?.reload()
                     delay(3000L)
                     continue
@@ -446,57 +484,87 @@ fun AvisoBrowserScreen(
             // Allow video player / page to load
             delay(1000L)
 
-            // Step 2: Active Video Watching & Verification Loop
-            val maxWaitSeconds = { (realInterstitialDurationSignal ?: expectedDuration) + 15 }
+            // Step 2: Active Video Watching & Background Countdown Loop
+            var remainingSec = expectedDuration
+            var lastObservedRealTimer = realTimerSecondsSignal
             var elapsedSec = 0
 
-            while (elapsedSec < maxWaitSeconds() && uiState.isAutoWorkRunning && !taskCompletedSignal) {
+            while (uiState.isAutoWorkRunning && !taskCompletedSignal) {
                 if (realInterstitialDurationSignal != null && realInterstitialDurationSignal!! > expectedDuration) {
-                    expectedDuration = realInterstitialDurationSignal!!
+                    val newDur = realInterstitialDurationSignal!!
+                    if (newDur > expectedDuration) {
+                        val diff = newDur - expectedDuration
+                        remainingSec += diff
+                        expectedDuration = newDur
+                    }
                 }
 
-                // If on viewer page, execute watcher to play & read real timer
-                val curUrl = webViewRef?.url.orEmpty()
-                if (curUrl.contains("/vl/") || curUrl.contains("/go/")) {
-                    webViewRef?.evaluateJavascript(AvisoTaskParser.JS_START_AND_WATCH_VIDEO, null)
+                // If website's live timer is actively updating, sync remainingSec
+                if (realTimerSecondsSignal > 0 && realTimerSecondsSignal != lastObservedRealTimer) {
+                    lastObservedRealTimer = realTimerSecondsSignal
+                    remainingSec = realTimerSecondsSignal
+                } else {
+                    remainingSec = (remainingSec - 1).coerceAtLeast(0)
+                }
+
+                // Continuously execute watcher to ensure playback & timer tracking
+                webViewRef?.evaluateJavascript(AvisoTaskParser.JS_START_AND_WATCH_VIDEO, null)
+
+                // Update countdown display in UI
+                viewModel.updateAutoWorkCountdown(remainingSec, expectedDuration)
+
+                // Show live background notification in Android status bar (works even in YouTube app / background)
+                AvisoNotificationHelper.showAutoWorkProgressNotification(context, remainingSec, expectedDuration)
+
+                // If countdown reached 0 or task was marked completed
+                if (remainingSec == 0 || realTimerSecondsSignal == 0 || taskCompletedSignal) {
+                    break
                 }
 
                 delay(1000L)
                 elapsedSec++
+            }
 
-                // Update countdown display
-                val currentRemaining = if (realTimerSecondsSignal > 0) {
-                    realTimerSecondsSignal
-                } else {
-                    (expectedDuration - elapsedSec).coerceAtLeast(0)
-                }
-                viewModel.updateAutoWorkCountdown(currentRemaining, expectedDuration)
+            if (!uiState.isAutoWorkRunning) {
+                AvisoNotificationHelper.cancelAutoWorkProgressNotification(context)
+                break
+            }
+            viewModel.updateAutoWorkCountdown(0, expectedDuration)
 
-                // If real timer reached 0 or confirm was triggered
-                if (realTimerSecondsSignal == 0 || taskCompletedSignal) {
+            // Step 3: Return from YouTube app / background to Aviso app and click Confirm
+            // Automatically bring our app back to the front screen
+            bringAppToFront(context)
+            AvisoNotificationHelper.sendAutoWorkFinishedNotification(context)
+
+            // Brief delay to allow WebView to regain focus and resume rendering
+            delay(1200L)
+
+            viewModel.setAutoWorkStatus("টাস্ক নিশ্চিতকরণ (Confirm View) করা হচ্ছে...")
+            var isConfirmed = false
+            for (attempt in 1..4) {
+                webViewRef?.evaluateJavascript(AvisoTaskParser.JS_AUTO_WORK_CLICK_CONFIRM, null)
+                webViewRef?.evaluateJavascript(AvisoTaskParser.JS_START_AND_WATCH_VIDEO, null)
+                delay(1200L)
+                if (taskCompletedSignal || confirmClickedSignal) {
+                    isConfirmed = true
                     break
                 }
             }
 
-            if (!uiState.isAutoWorkRunning) break
-            viewModel.updateAutoWorkCountdown(0, expectedDuration)
-
-            // Step 3: Switch back from YouTube app to our app!
-            bringAppToFront(context)
-            delay(600L)
-
-            // Step 4: Click Confirm in the active task row or on viewer page
-            viewModel.setAutoWorkStatus("টাস্ক নিশ্চিতকরণ (Confirm) করা হচ্ছে...")
-            for (attempt in 1..4) {
-                webViewRef?.evaluateJavascript(AvisoTaskParser.JS_AUTO_WORK_CLICK_CONFIRM, null)
-                delay(1000L)
-                if (taskCompletedSignal) break
+            // Record success or failure
+            val currentFinishUrl = webViewRef?.url.orEmpty()
+            if (isConfirmed || taskCompletedSignal || confirmClickedSignal || !currentFinishUrl.contains("tasks-youtube")) {
+                viewModel.incrementSuccessCount()
+                viewModel.setAutoWorkStatus("টাস্ক সফল হয়েছে! ✓ (মোট সফল: ${uiState.successfulTasksCount + 1})")
+            } else {
+                viewModel.incrementFailedCount()
+                viewModel.setAutoWorkStatus("টাস্ক কনফার্ম করা যায়নি (ব্যর্থ) ✗")
             }
 
-            // Step 5: Navigation cleanup
-            val finishUrl = webViewRef?.url.orEmpty()
-            if (finishUrl.contains("/vl/") || finishUrl.contains("/go/") || finishUrl.contains("youtube") || finishUrl.contains("create_session")) {
+            // Step 4: Navigation cleanup - return to tasks-youtube if on a subpage
+            if (!currentFinishUrl.contains("tasks-youtube")) {
                 viewModel.setAutoWorkStatus("ভিডিও দেখা সফল! তালিকায় ফিরে যাওয়া হচ্ছে...")
+                delay(2500L) // Allow user to see the reward confirmation on the website
                 if (webViewRef?.canGoBack() == true) {
                     webViewRef?.goBack()
                     delay(2500L)
@@ -509,7 +577,7 @@ fun AvisoBrowserScreen(
                 delay(1500L)
             }
 
-            // Step 6: Brief interval before scanning next task
+            // Step 5: Brief interval before scanning next task
             delay(1000L)
         }
     }
@@ -592,7 +660,11 @@ fun AvisoBrowserScreen(
                                     if (uiState.isAutoWorkRunning) {
                                         viewModel.stopAutoWork("ব্যবহারকারী বন্ধ করেছেন")
                                     } else {
-                                        viewModel.startAutoWork()
+                                        if (!AvisoPermissionHelper.canDrawOverlays(context) && !didDismissOverlayPrompt) {
+                                            showOverlayPromptDialog = true
+                                        } else {
+                                            viewModel.startAutoWork()
+                                        }
                                     }
                                 }
                                 .testTag("topbar_auto_work_button")
@@ -802,14 +874,13 @@ fun AvisoBrowserScreen(
                                 onConfirmClicked = { clicked ->
                                     post {
                                         if (clicked) {
+                                            confirmClickedSignal = true
                                             viewModel.setAutoWorkStatus("Подтвердить просмотр সফল হয়েছে")
                                         }
                                     }
                                 },
-                                onVideoPositionFound = { x, y ->
-                                    post {
-                                        simulateTap(this, x, y)
-                                    }
+                                onVideoPositionFound = { _, _ ->
+                                    // Player iframe is controlled cleanly via JS postMessage
                                 },
                                 onRealTimerUpdate = { secondsLeft ->
                                     post {
@@ -852,6 +923,27 @@ fun AvisoBrowserScreen(
                                 title?.let { viewModel.setPageTitle(it) }
                             }
 
+                            override fun onShowFileChooser(
+                                webView: WebView?,
+                                filePathCallback: ValueCallback<Array<Uri>>?,
+                                fileChooserParams: FileChooserParams?
+                            ): Boolean {
+                                fileUploadCallback?.onReceiveValue(null)
+                                fileUploadCallback = filePathCallback
+                                return try {
+                                    val intent = fileChooserParams?.createIntent() ?: Intent(Intent.ACTION_GET_CONTENT).apply {
+                                        type = "*/*"
+                                        addCategory(Intent.CATEGORY_OPENABLE)
+                                    }
+                                    fileChooserLauncher.launch(intent)
+                                    true
+                                } catch (_: Exception) {
+                                    fileUploadCallback?.onReceiveValue(null)
+                                    fileUploadCallback = null
+                                    false
+                                }
+                            }
+
                             override fun onCreateWindow(
                                 view: WebView?,
                                 isDialog: Boolean,
@@ -868,13 +960,12 @@ fun AvisoBrowserScreen(
                                     override fun shouldOverrideUrlLoading(v: WebView?, request: WebResourceRequest?): Boolean {
                                         val targetUrl = request?.url?.toString().orEmpty()
                                         if (targetUrl.isNotEmpty()) {
-                                            if (targetUrl.contains("youtube.com") || targetUrl.contains("youtu.be") || targetUrl.startsWith("vnd.youtube") || targetUrl.startsWith("intent:")) {
-                                                launchYouTubeApp(mainWebView.context, targetUrl)
-                                                v?.destroy()
-                                                return true
-                                            }
-                                            mainWebView.post {
-                                                mainWebView.loadUrl(targetUrl)
+                                            if (targetUrl.contains("aviso.bz")) {
+                                                mainWebView.post {
+                                                    mainWebView.loadUrl(targetUrl)
+                                                }
+                                            } else if (targetUrl.contains("youtube.com") || targetUrl.contains("youtu.be")) {
+                                                launchYouTubeApp(ctx, targetUrl)
                                             }
                                             v?.destroy()
                                         }
@@ -884,13 +975,12 @@ fun AvisoBrowserScreen(
                                     override fun onPageStarted(v: WebView?, url: String?, favicon: Bitmap?) {
                                         val targetUrl = url.orEmpty()
                                         if (targetUrl.isNotEmpty() && targetUrl != "about:blank") {
-                                            if (targetUrl.contains("youtube.com") || targetUrl.contains("youtu.be") || targetUrl.startsWith("vnd.youtube") || targetUrl.startsWith("intent:")) {
-                                                launchYouTubeApp(mainWebView.context, targetUrl)
-                                                v?.destroy()
-                                                return
-                                            }
-                                            mainWebView.post {
-                                                mainWebView.loadUrl(targetUrl)
+                                            if (targetUrl.contains("aviso.bz")) {
+                                                mainWebView.post {
+                                                    mainWebView.loadUrl(targetUrl)
+                                                }
+                                            } else if (targetUrl.contains("youtube.com") || targetUrl.contains("youtu.be")) {
+                                                launchYouTubeApp(ctx, targetUrl)
                                             }
                                             v?.destroy()
                                         }
@@ -906,8 +996,16 @@ fun AvisoBrowserScreen(
                         webViewClient = object : WebViewClient() {
                             override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                                 val url = request?.url?.toString() ?: return false
-                                if (url.contains("youtube.com") || url.contains("youtu.be") || url.startsWith("vnd.youtube") || url.startsWith("intent:")) {
-                                    launchYouTubeApp(ctx, url)
+                                if (url.startsWith("intent:") || url.startsWith("vnd.youtube:")) {
+                                    try {
+                                        val intent = Intent.parseUri(url, Intent.URI_INTENT_SCHEME)
+                                        val fallback = intent.getStringExtra("browser_fallback_url")
+                                        if (!fallback.isNullOrEmpty() && fallback.contains("aviso.bz")) {
+                                            view?.loadUrl(fallback)
+                                            return true
+                                        }
+                                        ctx.startActivity(intent)
+                                    } catch (_: Exception) {}
                                     return true
                                 }
                                 if (url.startsWith("http://") || url.startsWith("https://")) {
@@ -1082,6 +1180,54 @@ fun AvisoBrowserScreen(
                         }
                     }
                 }
+            }
+
+            // Overlay Permission Recommendation Dialog (For Auto-Return from YouTube)
+            if (showOverlayPromptDialog) {
+                androidx.compose.material3.AlertDialog(
+                    onDismissRequest = {
+                        showOverlayPromptDialog = false
+                        didDismissOverlayPrompt = true
+                        viewModel.startAutoWork()
+                    },
+                    title = {
+                        Text(
+                            text = "অন্যান্য অ্যাপের উপর প্রদর্শন পারমিশন",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp
+                        )
+                    },
+                    text = {
+                        Text(
+                            text = "YouTube অ্যাপে ভিডিও দেখা শেষ হওয়ার সাথে সাথে Aviso অ্যাপ যেন নিজে থেকেই স্ক্রিনে ফিরে এসে 'Подтвердить просмотр' কনফার্ম করতে পারে, সেজন্য 'Display over other apps' অনুমতি দেওয়া সুপারিশ করা হচ্ছে।\n\nআপনি কি এখনই এই অনুমতি চালু করতে চান?",
+                            fontSize = 13.sp,
+                            lineHeight = 18.sp
+                        )
+                    },
+                    confirmButton = {
+                        androidx.compose.material3.Button(
+                            onClick = {
+                                showOverlayPromptDialog = false
+                                didDismissOverlayPrompt = true
+                                viewModel.requestOverlayPermission(context)
+                                viewModel.startAutoWork()
+                            }
+                        ) {
+                            Text("অনুমতি দিন")
+                        }
+                    },
+                    dismissButton = {
+                        androidx.compose.material3.TextButton(
+                            onClick = {
+                                showOverlayPromptDialog = false
+                                didDismissOverlayPrompt = true
+                                viewModel.startAutoWork()
+                            }
+                        ) {
+                            Text("পরে (এখনই শুরু করুন)")
+                        }
+                    }
+                )
             }
 
             // Live Countdown HUD (Shown only when Auto Work is active - no bottom start button as user requested)
@@ -1288,6 +1434,72 @@ fun AvisoBrowserScreen(
                                 )
                             }
                         }
+                    }
+                }
+            }
+
+            // Bottom-Right Small Success / Failure Counter
+            // Requested: "কয়টা কাজ সফল হইছে আর কয়টা হয়নি তা নিচে একদম ডান এ ছোট করে থাকবে একদম ছোট"
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.22f)),
+                shadowElevation = 4.dp,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(bottom = 6.dp, end = 6.dp)
+                    .clickable {
+                        Toast.makeText(
+                            context,
+                            "সফল: ${uiState.successfulTasksCount} টি | ব্যর্থ: ${uiState.failedTasksCount} টি",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                    .testTag("task_counter_bottom_right_badge")
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    // Success counter
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.CheckCircle,
+                            contentDescription = "সফল কাজ",
+                            tint = Color(0xFF10B981),
+                            modifier = Modifier.size(10.dp)
+                        )
+                        Spacer(modifier = Modifier.width(2.5.dp))
+                        Text(
+                            text = "${uiState.successfulTasksCount}",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF047857)
+                        )
+                    }
+
+                    Text(
+                        text = "•",
+                        fontSize = 8.sp,
+                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)
+                    )
+
+                    // Failed counter
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Cancel,
+                            contentDescription = "ব্যর্থ কাজ",
+                            tint = Color(0xFFEF4444),
+                            modifier = Modifier.size(10.dp)
+                        )
+                        Spacer(modifier = Modifier.width(2.5.dp))
+                        Text(
+                            text = "${uiState.failedTasksCount}",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFFDC2626)
+                        )
                     }
                 }
             }
