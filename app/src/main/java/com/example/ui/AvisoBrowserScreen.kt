@@ -75,6 +75,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -188,7 +189,8 @@ class AvisoBridge(
     private val onRealTimerUpdate: (Int) -> Unit = {},
     private val onTaskCompleted: () -> Unit = {},
     private val onInterstitialHandled: (Int) -> Unit = {},
-    private val onOpenYouTube: (String) -> Unit = {}
+    private val onOpenYouTube: (String) -> Unit = {},
+    private val onOpenNewTab: (String, Int) -> Unit = { _, _ -> }
 ) {
     @JavascriptInterface
     fun onTasksScanned(json: String) {
@@ -198,6 +200,11 @@ class AvisoBridge(
     @JavascriptInterface
     fun openInYouTubeApp(url: String) {
         onOpenYouTube.invoke(url)
+    }
+
+    @JavascriptInterface
+    fun openNewTab(url: String, durationSec: Int) {
+        onOpenNewTab.invoke(url, durationSec)
     }
 
     @JavascriptInterface
@@ -262,6 +269,7 @@ fun AvisoBrowserScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
     val uiState by viewModel.uiState.collectAsState()
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
+    var secondaryWebViewRef by remember { mutableStateOf<WebView?>(null) }
     var canGoBack by remember { mutableStateOf(false) }
 
     // Synchronize service state and notification preferences on launch
@@ -381,12 +389,52 @@ fun AvisoBrowserScreen(
         }
         manualWatchCountdown = 0
         if (!uiState.isAutoWorkRunning) {
-            webViewRef?.evaluateJavascript(AvisoTaskParser.JS_AUTO_WORK_CLICK_CONFIRM, null)
-            Toast.makeText(context, "ভিডিও দেখা সম্পন্ন হয়েছে!", Toast.LENGTH_SHORT).show()
+            for (attempt in 1..4) {
+                webViewRef?.evaluateJavascript(AvisoTaskParser.JS_AUTO_WORK_CLICK_CONFIRM, null)
+                webViewRef?.evaluateJavascript(AvisoTaskParser.JS_START_AND_WATCH_VIDEO, null)
+                delay(1000L)
+            }
+            Toast.makeText(context, "ভিডিও দেখা সম্পন্ন ও কনফার্ম করা হয়েছে ✓", Toast.LENGTH_SHORT).show()
         }
         delay(2000L)
         manualWatchTotal = null
         manualWatchCountdown = null
+    }
+
+    // Secondary Video Tab Countdown & Auto-Close Engine (User-requested feature)
+    LaunchedEffect(uiState.isVideoTabOpen, uiState.videoTabUrl) {
+        if (!uiState.isVideoTabOpen || uiState.videoTabUrl.isNullOrEmpty()) {
+            return@LaunchedEffect
+        }
+        val totalSec = if (uiState.videoTabDuration > 0) uiState.videoTabDuration else 20
+        var remaining = totalSec
+        viewModel.updateVideoTabCountdown(remaining, totalSec)
+
+        while (isActive && uiState.isVideoTabOpen && remaining > 0) {
+            delay(1000L)
+            remaining--
+            viewModel.updateVideoTabCountdown(remaining, totalSec)
+            AvisoNotificationHelper.showAutoWorkProgressNotification(context, remaining, totalSec)
+            secondaryWebViewRef?.evaluateJavascript(AvisoTaskParser.JS_START_AND_WATCH_VIDEO, null)
+        }
+
+        if (uiState.isVideoTabOpen && remaining <= 0) {
+            // Video countdown finished! Bring app to front if user was in YouTube app / background
+            bringAppToFront(context)
+            AvisoNotificationHelper.sendAutoWorkFinishedNotification(context)
+
+            // Auto-close Video Tab and switch back to Aviso Tasks Tab
+            viewModel.closeVideoTab()
+            viewModel.selectTab(0)
+
+            delay(1000L)
+            // Auto click confirm on Main Aviso WebView
+            for (attempt in 1..4) {
+                webViewRef?.evaluateJavascript(AvisoTaskParser.JS_AUTO_WORK_CLICK_CONFIRM, null)
+                delay(1000L)
+            }
+            Toast.makeText(context, "🎬 ভিডিও দেখা সম্পন্ন হয়েছে! মূল পেজে কনফার্ম করা হয়েছে ✓", Toast.LENGTH_SHORT).show()
+        }
     }
 
     // Auto Work Execution Engine
@@ -796,6 +844,122 @@ fun AvisoBrowserScreen(
                             .height(3.dp)
                     )
                 }
+
+                // Dynamic Tab Header (Shows when Video Tab is open)
+                if (uiState.isVideoTabOpen) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.85f),
+                        border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("tab_bar_header")
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // Tab 0: Main Aviso Tab
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = if (uiState.selectedTabIndex == 0) MaterialTheme.colorScheme.surface else Color.Transparent,
+                                border = BorderStroke(
+                                    1.dp,
+                                    if (uiState.selectedTabIndex == 0) MaterialTheme.colorScheme.primary else Color.Transparent
+                                ),
+                                shadowElevation = if (uiState.selectedTabIndex == 0) 2.dp else 0.dp,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable { viewModel.selectTab(0) }
+                                    .testTag("tab_main_aviso")
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(8.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(0xFF10B981))
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "🌐 Aviso.bz",
+                                        fontWeight = if (uiState.selectedTabIndex == 0) FontWeight.Bold else FontWeight.Medium,
+                                        fontSize = 12.sp,
+                                        color = if (uiState.selectedTabIndex == 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+
+                            // Tab 1: Video Tab (With live timer & close button)
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = if (uiState.selectedTabIndex == 1) MaterialTheme.colorScheme.primaryContainer else Color(0xFFFFEBEE).copy(alpha = 0.9f),
+                                border = BorderStroke(
+                                    1.dp,
+                                    if (uiState.selectedTabIndex == 1) MaterialTheme.colorScheme.primary else Color(0xFFEF5350).copy(alpha = 0.5f)
+                                ),
+                                shadowElevation = if (uiState.selectedTabIndex == 1) 3.dp else 0.dp,
+                                modifier = Modifier
+                                    .weight(1.3f)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable { viewModel.selectTab(1) }
+                                    .testTag("tab_video_player")
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(8.dp)
+                                                .clip(CircleShape)
+                                                .background(Color(0xFFEF4444))
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = "🎬 ভিডিও (${uiState.videoTabRemainingSec}s)",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 12.sp,
+                                            color = if (uiState.selectedTabIndex == 1) MaterialTheme.colorScheme.onPrimaryContainer else Color(0xFFC62828),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+
+                                    // Close Tab Button
+                                    IconButton(
+                                        onClick = {
+                                            viewModel.closeVideoTab()
+                                            viewModel.selectTab(0)
+                                        },
+                                        modifier = Modifier
+                                            .size(22.dp)
+                                            .testTag("close_video_tab_button")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "ট্যাব বন্ধ করুন",
+                                            tint = Color(0xFFD32F2F),
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     ) { innerPadding ->
@@ -804,282 +968,429 @@ fun AvisoBrowserScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            // Main Web Browser View
-            AndroidView(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .testTag("aviso_webview"),
-                factory = { ctx ->
-                    WebView(ctx).apply {
-                        layoutParams = ViewGroup.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            ViewGroup.LayoutParams.MATCH_PARENT
-                        )
+            // Tab 2 (Video Player Tab View)
+            if (uiState.selectedTabIndex == 1 && uiState.isVideoTabOpen && !uiState.videoTabUrl.isNullOrEmpty()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color(0xFF0F172A))
+                        .testTag("video_tab_container")
+                ) {
+                    // Top Info Banner in Tab 2
+                    Surface(
+                        color = Color(0xFF1E293B),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(28.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(0xFFEF4444)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.PlayArrow,
+                                            contentDescription = null,
+                                            tint = Color.White,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Column {
+                                        Text(
+                                            text = "🎬 ভিডিও দেখা হচ্ছে: ${uiState.videoTabRemainingSec} সেকেন্ড বাকি",
+                                            color = Color.White,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 13.sp
+                                        )
+                                        Text(
+                                            text = "সময় শেষ হলে ট্যাব একাই বন্ধ হয়ে মূল পেজে কনফার্ম করবে ✓",
+                                            color = Color(0xFF94A3B8),
+                                            fontSize = 11.sp
+                                        )
+                                    }
+                                }
 
-                        // Cookie Setup for Aviso Session & Login
-                        val cookieManager = CookieManager.getInstance()
-                        cookieManager.setAcceptCookie(true)
-                        cookieManager.setAcceptThirdPartyCookies(this, true)
+                                OutlinedButton(
+                                    onClick = {
+                                        viewModel.closeVideoTab()
+                                        viewModel.selectTab(0)
+                                    },
+                                    modifier = Modifier.height(32.dp),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                    border = BorderStroke(1.dp, Color(0xFFEF4444))
+                                ) {
+                                    Icon(
+                                        Icons.Default.Close,
+                                        contentDescription = null,
+                                        tint = Color(0xFFEF4444),
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("ট্যাব বন্ধ", fontSize = 11.sp, color = Color(0xFFEF4444))
+                                }
+                            }
 
-                        // WebSettings optimization
-                        settings.apply {
-                            javaScriptEnabled = true
-                            domStorageEnabled = true
-                            databaseEnabled = true
-                            loadWithOverviewMode = true
-                            useWideViewPort = true
-                            setSupportZoom(true)
-                            builtInZoomControls = true
-                            displayZoomControls = false
-                            allowFileAccess = true
-                            allowContentAccess = true
-                            javaScriptCanOpenWindowsAutomatically = true
-                            setSupportMultipleWindows(true)
-                            mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                            cacheMode = WebSettings.LOAD_DEFAULT
-                            userAgentString = "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36"
-                            textZoom = uiState.zoomPercent
-                            // Allow video playback to start without requiring manual physical user gesture
-                            mediaPlaybackRequiresUserGesture = false
+                            Spacer(modifier = Modifier.height(8.dp))
+                            val tot = if (uiState.videoTabDuration > 0) uiState.videoTabDuration else 20
+                            LinearProgressIndicator(
+                                progress = { (uiState.videoTabRemainingSec.toFloat() / tot).coerceIn(0f, 1f) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(4.dp)
+                                    .clip(RoundedCornerShape(2.dp)),
+                                color = Color(0xFFEF4444),
+                                trackColor = Color(0xFF334155)
+                            )
                         }
+                    }
 
-                        // Register Bridge for Full Site Task Detection & Auto Work
-                        addJavascriptInterface(
-                            AvisoBridge(
-                                onResult = { json ->
-                                    post {
-                                        viewModel.onScanResultReceived(ctx, json)
+                    // Video WebView inside Tab 2
+                    AndroidView(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .weight(1f)
+                            .testTag("secondary_video_webview"),
+                        factory = { ctx ->
+                            WebView(ctx).apply {
+                                layoutParams = ViewGroup.LayoutParams(
+                                    ViewGroup.LayoutParams.MATCH_PARENT,
+                                    ViewGroup.LayoutParams.MATCH_PARENT
+                                )
+                                val cookieManager = CookieManager.getInstance()
+                                cookieManager.setAcceptCookie(true)
+                                cookieManager.setAcceptThirdPartyCookies(this, true)
+
+                                settings.apply {
+                                    javaScriptEnabled = true
+                                    domStorageEnabled = true
+                                    databaseEnabled = true
+                                    loadWithOverviewMode = true
+                                    useWideViewPort = true
+                                    mediaPlaybackRequiresUserGesture = false
+                                    userAgentString = "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36"
+                                }
+
+                                webChromeClient = WebChromeClient()
+                                webViewClient = object : WebViewClient() {
+                                    override fun onPageFinished(view: WebView?, url: String?) {
+                                        view?.evaluateJavascript(AvisoTaskParser.JS_START_AND_WATCH_VIDEO, null)
                                     }
-                                },
-                                onCaptchaFound = { reason ->
-                                    post {
-                                        viewModel.onCaptchaDetected(ctx, reason)
-                                    }
-                                },
-                                onTaskFound = { title, durationSec ->
-                                    post {
-                                        viewModel.setAutoWorkStatus("কাজ পাওয়া গেছে ($durationSec সেক)", title)
-                                    }
-                                },
-                                onTaskStarted = { durationSec ->
-                                    post {
-                                        autoWorkTaskStartedSignal = durationSec
-                                    }
-                                },
-                                onNoTasks = {
-                                    post {
-                                        autoWorkNoTasksSignal = true
-                                    }
-                                },
-                                onConfirmClicked = { clicked ->
-                                    post {
-                                        if (clicked) {
-                                            confirmClickedSignal = true
-                                            viewModel.setAutoWorkStatus("Подтвердить просмотр সফল হয়েছে")
+                                }
+
+                                uiState.videoTabUrl?.let { loadUrl(it) }
+                                secondaryWebViewRef = this
+                            }
+                        },
+                        update = { wv ->
+                            secondaryWebViewRef = wv
+                        }
+                    )
+                }
+            } else {
+                // Tab 0: Main Web Browser View
+                AndroidView(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .testTag("aviso_webview"),
+                    factory = { ctx ->
+                        WebView(ctx).apply {
+                            layoutParams = ViewGroup.LayoutParams(
+                                ViewGroup.LayoutParams.MATCH_PARENT,
+                                ViewGroup.LayoutParams.MATCH_PARENT
+                            )
+
+                            // Cookie Setup for Aviso Session & Login
+                            val cookieManager = CookieManager.getInstance()
+                            cookieManager.setAcceptCookie(true)
+                            cookieManager.setAcceptThirdPartyCookies(this, true)
+
+                            // WebSettings optimization
+                            settings.apply {
+                                javaScriptEnabled = true
+                                domStorageEnabled = true
+                                databaseEnabled = true
+                                loadWithOverviewMode = true
+                                useWideViewPort = true
+                                setSupportZoom(true)
+                                builtInZoomControls = true
+                                displayZoomControls = false
+                                allowFileAccess = true
+                                allowContentAccess = true
+                                javaScriptCanOpenWindowsAutomatically = true
+                                setSupportMultipleWindows(true)
+                                mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                                cacheMode = WebSettings.LOAD_DEFAULT
+                                userAgentString = "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36"
+                                textZoom = uiState.zoomPercent
+                                // Allow video playback to start without requiring manual physical user gesture
+                                mediaPlaybackRequiresUserGesture = false
+                            }
+
+                            // Register Bridge for Full Site Task Detection & Auto Work
+                            addJavascriptInterface(
+                                AvisoBridge(
+                                    onResult = { json ->
+                                        post {
+                                            viewModel.onScanResultReceived(ctx, json)
                                         }
-                                    }
-                                },
-                                onVideoPositionFound = { _, _ ->
-                                    // Player iframe is controlled cleanly via JS postMessage
-                                },
-                                onRealTimerUpdate = { secondsLeft ->
-                                    post {
-                                        realTimerSecondsSignal = secondsLeft
-                                    }
-                                },
-                                onTaskCompleted = {
-                                    post {
-                                        taskCompletedSignal = true
-                                    }
-                                },
-                                onInterstitialHandled = { durationSec ->
-                                    post {
-                                        realInterstitialDurationSignal = durationSec
-                                        if (uiState.isAutoWorkRunning) {
+                                    },
+                                    onCaptchaFound = { reason ->
+                                        post {
+                                            viewModel.onCaptchaDetected(ctx, reason)
+                                        }
+                                    },
+                                    onTaskFound = { title, durationSec ->
+                                        post {
+                                            viewModel.setAutoWorkStatus("কাজ পাওয়া গেছে ($durationSec সেক)", title)
+                                        }
+                                    },
+                                    onTaskStarted = { durationSec ->
+                                        post {
                                             autoWorkTaskStartedSignal = durationSec
-                                            viewModel.setAutoWorkStatus("Start Watching সফল! $durationSec সেক...")
-                                        } else {
-                                            manualWatchTotal = durationSec
-                                            manualWatchCountdown = durationSec
-                                            Toast.makeText(ctx, "Start Watching ক্লিক হয়েছে! $durationSec সেকেন্ড দেখা হচ্ছে...", Toast.LENGTH_SHORT).show()
+                                        }
+                                    },
+                                    onNoTasks = {
+                                        post {
+                                            autoWorkNoTasksSignal = true
+                                        }
+                                    },
+                                    onConfirmClicked = { clicked ->
+                                        post {
+                                            if (clicked) {
+                                                confirmClickedSignal = true
+                                                viewModel.setAutoWorkStatus("Подтвердить просмотр সফল হয়েছে")
+                                            }
+                                        }
+                                    },
+                                    onVideoPositionFound = { _, _ ->
+                                        // Player iframe is controlled cleanly via JS postMessage
+                                    },
+                                    onRealTimerUpdate = { secondsLeft ->
+                                        post {
+                                            realTimerSecondsSignal = secondsLeft
+                                        }
+                                    },
+                                    onTaskCompleted = {
+                                        post {
+                                            taskCompletedSignal = true
+                                        }
+                                    },
+                                    onInterstitialHandled = { durationSec ->
+                                        post {
+                                            realInterstitialDurationSignal = durationSec
+                                            if (uiState.isAutoWorkRunning) {
+                                                autoWorkTaskStartedSignal = durationSec
+                                                viewModel.setAutoWorkStatus("Start Watching সফল! $durationSec সেক...")
+                                            } else {
+                                                manualWatchTotal = durationSec
+                                                manualWatchCountdown = durationSec
+                                                Toast.makeText(ctx, "Start Watching ক্লিক হয়েছে! $durationSec সেকেন্ড দেখা হচ্ছে...", Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
+                                    },
+                                    onOpenYouTube = { url ->
+                                        post {
+                                            launchYouTubeApp(ctx, url)
+                                        }
+                                    },
+                                    onOpenNewTab = { url, durationSec ->
+                                        post {
+                                            if (uiState.openInExternalYouTubeApp) {
+                                                launchYouTubeApp(ctx, url)
+                                            }
+                                            viewModel.openVideoTab(url, durationSec)
                                         }
                                     }
-                                },
-                                onOpenYouTube = { url ->
-                                    post {
-                                        launchYouTubeApp(ctx, url)
-                                    }
+                                ),
+                                "AvisoBridge"
+                            )
+
+                            webChromeClient = object : WebChromeClient() {
+                                override fun onProgressChanged(view: WebView?, newProgress: Int) {
+                                    viewModel.setProgress(newProgress)
                                 }
-                            ),
-                            "AvisoBridge"
-                        )
 
-                        webChromeClient = object : WebChromeClient() {
-                            override fun onProgressChanged(view: WebView?, newProgress: Int) {
-                                viewModel.setProgress(newProgress)
-                            }
+                                override fun onReceivedTitle(view: WebView?, title: String?) {
+                                    title?.let { viewModel.setPageTitle(it) }
+                                }
 
-                            override fun onReceivedTitle(view: WebView?, title: String?) {
-                                title?.let { viewModel.setPageTitle(it) }
-                            }
-
-                            override fun onShowFileChooser(
-                                webView: WebView?,
-                                filePathCallback: ValueCallback<Array<Uri>>?,
-                                fileChooserParams: FileChooserParams?
-                            ): Boolean {
-                                fileUploadCallback?.onReceiveValue(null)
-                                fileUploadCallback = filePathCallback
-                                return try {
-                                    val intent = fileChooserParams?.createIntent() ?: Intent(Intent.ACTION_GET_CONTENT).apply {
-                                        type = "*/*"
-                                        addCategory(Intent.CATEGORY_OPENABLE)
-                                    }
-                                    fileChooserLauncher.launch(intent)
-                                    true
-                                } catch (_: Exception) {
+                                override fun onShowFileChooser(
+                                    webView: WebView?,
+                                    filePathCallback: ValueCallback<Array<Uri>>?,
+                                    fileChooserParams: FileChooserParams?
+                                ): Boolean {
                                     fileUploadCallback?.onReceiveValue(null)
-                                    fileUploadCallback = null
-                                    false
-                                }
-                            }
-
-                            override fun onCreateWindow(
-                                view: WebView?,
-                                isDialog: Boolean,
-                                isUserGesture: Boolean,
-                                resultMsg: Message?
-                            ): Boolean {
-                                val mainWebView = view ?: return false
-                                val tempWebView = WebView(mainWebView.context).apply {
-                                    settings.javaScriptEnabled = true
-                                    settings.domStorageEnabled = true
-                                    settings.userAgentString = mainWebView.settings.userAgentString
-                                }
-                                tempWebView.webViewClient = object : WebViewClient() {
-                                    override fun shouldOverrideUrlLoading(v: WebView?, request: WebResourceRequest?): Boolean {
-                                        val targetUrl = request?.url?.toString().orEmpty()
-                                        if (targetUrl.isNotEmpty()) {
-                                            if (targetUrl.contains("aviso.bz")) {
-                                                mainWebView.post {
-                                                    mainWebView.loadUrl(targetUrl)
-                                                }
-                                            } else if (targetUrl.contains("youtube.com") || targetUrl.contains("youtu.be")) {
-                                                launchYouTubeApp(ctx, targetUrl)
-                                            }
-                                            v?.destroy()
+                                    fileUploadCallback = filePathCallback
+                                    return try {
+                                        val intent = fileChooserParams?.createIntent() ?: Intent(Intent.ACTION_GET_CONTENT).apply {
+                                            type = "*/*"
+                                            addCategory(Intent.CATEGORY_OPENABLE)
                                         }
-                                        return true
-                                    }
-
-                                    override fun onPageStarted(v: WebView?, url: String?, favicon: Bitmap?) {
-                                        val targetUrl = url.orEmpty()
-                                        if (targetUrl.isNotEmpty() && targetUrl != "about:blank") {
-                                            if (targetUrl.contains("aviso.bz")) {
-                                                mainWebView.post {
-                                                    mainWebView.loadUrl(targetUrl)
-                                                }
-                                            } else if (targetUrl.contains("youtube.com") || targetUrl.contains("youtu.be")) {
-                                                launchYouTubeApp(ctx, targetUrl)
-                                            }
-                                            v?.destroy()
-                                        }
+                                        fileChooserLauncher.launch(intent)
+                                        true
+                                    } catch (_: Exception) {
+                                        fileUploadCallback?.onReceiveValue(null)
+                                        fileUploadCallback = null
+                                        false
                                     }
                                 }
-                                val transport = resultMsg?.obj as? WebView.WebViewTransport
-                                transport?.webView = tempWebView
-                                resultMsg?.sendToTarget()
-                                return true
-                            }
-                        }
 
-                        webViewClient = object : WebViewClient() {
-                            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-                                val url = request?.url?.toString() ?: return false
-                                if (url.startsWith("intent:") || url.startsWith("vnd.youtube:")) {
-                                    try {
-                                        val intent = Intent.parseUri(url, Intent.URI_INTENT_SCHEME)
-                                        val fallback = intent.getStringExtra("browser_fallback_url")
-                                        if (!fallback.isNullOrEmpty() && fallback.contains("aviso.bz")) {
-                                            view?.loadUrl(fallback)
+                                override fun onCreateWindow(
+                                    view: WebView?,
+                                    isDialog: Boolean,
+                                    isUserGesture: Boolean,
+                                    resultMsg: Message?
+                                ): Boolean {
+                                    val mainWebView = view ?: return false
+                                    val tempWebView = WebView(mainWebView.context).apply {
+                                        settings.javaScriptEnabled = true
+                                        settings.domStorageEnabled = true
+                                        settings.userAgentString = mainWebView.settings.userAgentString
+                                    }
+                                    tempWebView.webViewClient = object : WebViewClient() {
+                                        override fun shouldOverrideUrlLoading(v: WebView?, request: WebResourceRequest?): Boolean {
+                                            val targetUrl = request?.url?.toString().orEmpty()
+                                            if (targetUrl.isNotEmpty()) {
+                                                if (targetUrl.contains("youtube.com") || targetUrl.contains("youtu.be") || targetUrl.contains("/vl/") || targetUrl.contains("/go/") || targetUrl.contains("create_session")) {
+                                                    if (uiState.openInExternalYouTubeApp) {
+                                                        launchYouTubeApp(ctx, targetUrl)
+                                                    }
+                                                    viewModel.openVideoTab(targetUrl, 20)
+                                                } else {
+                                                    mainWebView.post {
+                                                        mainWebView.loadUrl(targetUrl)
+                                                    }
+                                                }
+                                                v?.destroy()
+                                            }
                                             return true
                                         }
-                                        ctx.startActivity(intent)
-                                    } catch (_: Exception) {}
+
+                                        override fun onPageStarted(v: WebView?, url: String?, favicon: Bitmap?) {
+                                            val targetUrl = url.orEmpty()
+                                            if (targetUrl.isNotEmpty() && targetUrl != "about:blank") {
+                                                if (targetUrl.contains("youtube.com") || targetUrl.contains("youtu.be") || targetUrl.contains("/vl/") || targetUrl.contains("/go/") || targetUrl.contains("create_session")) {
+                                                    if (uiState.openInExternalYouTubeApp) {
+                                                        launchYouTubeApp(ctx, targetUrl)
+                                                    }
+                                                    viewModel.openVideoTab(targetUrl, 20)
+                                                } else {
+                                                    mainWebView.post {
+                                                        mainWebView.loadUrl(targetUrl)
+                                                    }
+                                                }
+                                                v?.destroy()
+                                            }
+                                        }
+                                    }
+                                    val transport = resultMsg?.obj as? WebView.WebViewTransport
+                                    transport?.webView = tempWebView
+                                    resultMsg?.sendToTarget()
                                     return true
                                 }
-                                if (url.startsWith("http://") || url.startsWith("https://")) {
-                                    return false // Load inside this WebView
+                            }
+
+                            webViewClient = object : WebViewClient() {
+                                override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                                    val url = request?.url?.toString() ?: return false
+                                    if (url.startsWith("intent:") || url.startsWith("vnd.youtube:")) {
+                                        try {
+                                            val intent = Intent.parseUri(url, Intent.URI_INTENT_SCHEME)
+                                            val fallback = intent.getStringExtra("browser_fallback_url")
+                                            if (!fallback.isNullOrEmpty() && fallback.contains("aviso.bz")) {
+                                                view?.loadUrl(fallback)
+                                                return true
+                                            }
+                                            ctx.startActivity(intent)
+                                        } catch (_: Exception) {}
+                                        return true
+                                    }
+                                    if (url.startsWith("http://") || url.startsWith("https://")) {
+                                        return false // Load inside this WebView
+                                    }
+                                    return true
                                 }
-                                return true
-                            }
 
-                            override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
-                                canGoBack = view?.canGoBack() == true
-                                viewModel.setErrorMessage(null)
-                                // Pre-override window.open early
-                                view?.evaluateJavascript(AvisoTaskParser.JS_SETUP_OVERRIDE, null)
-                            }
+                                override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                                    canGoBack = view?.canGoBack() == true
+                                    viewModel.setErrorMessage(null)
+                                    // Pre-override window.open early
+                                    view?.evaluateJavascript(AvisoTaskParser.JS_SETUP_OVERRIDE, null)
+                                }
 
-                            override fun onPageFinished(view: WebView?, url: String?) {
-                                canGoBack = view?.canGoBack() == true
-                                CookieManager.getInstance().flush()
+                                override fun onPageFinished(view: WebView?, url: String?) {
+                                    canGoBack = view?.canGoBack() == true
+                                    CookieManager.getInstance().flush()
 
-                                // Override window.open and blank links to keep all tasks inside this WebView
-                                view?.evaluateJavascript(AvisoTaskParser.JS_SETUP_OVERRIDE, null)
+                                    // Override window.open and blank links to keep all tasks inside this WebView
+                                    view?.evaluateJavascript(AvisoTaskParser.JS_SETUP_OVERRIDE, null)
 
-                                // Apply user zoom scale
-                                val zoomScale = uiState.zoomPercent / 100f
-                                view?.evaluateJavascript("document.body.style.zoom = '$zoomScale';", null)
+                                    // Apply user zoom scale
+                                    val zoomScale = uiState.zoomPercent / 100f
+                                    view?.evaluateJavascript("document.body.style.zoom = '$zoomScale';", null)
 
-                                // Check and handle "Start Watching" interstitial screen if present
-                                view?.evaluateJavascript(AvisoTaskParser.JS_CHECK_AND_HANDLE_INTERSTITIAL, null)
-                                view?.postDelayed({
-                                    view.evaluateJavascript(AvisoTaskParser.JS_CHECK_AND_HANDLE_INTERSTITIAL, null)
-                                }, 700L)
-
-                                // If this is a video or session page, trigger start and watch immediately
-                                val pageUrl = url.orEmpty()
-                                if (pageUrl.contains("/vl/") || pageUrl.contains("/go/") || pageUrl.contains("youtube") || pageUrl.contains("create_session")) {
-                                    view?.evaluateJavascript(AvisoTaskParser.JS_START_AND_WATCH_VIDEO, null)
+                                    // Check and handle "Start Watching" interstitial screen if present
+                                    view?.evaluateJavascript(AvisoTaskParser.JS_CHECK_AND_HANDLE_INTERSTITIAL, null)
                                     view?.postDelayed({
-                                        view.evaluateJavascript(AvisoTaskParser.JS_START_AND_WATCH_VIDEO, null)
-                                    }, 1000L)
+                                        view.evaluateJavascript(AvisoTaskParser.JS_CHECK_AND_HANDLE_INTERSTITIAL, null)
+                                    }, 700L)
+
+                                    // If this is a video or session page, trigger start and watch immediately
+                                    val pageUrl = url.orEmpty()
+                                    if (pageUrl.contains("/vl/") || pageUrl.contains("/go/") || pageUrl.contains("youtube") || pageUrl.contains("create_session")) {
+                                        view?.evaluateJavascript(AvisoTaskParser.JS_START_AND_WATCH_VIDEO, null)
+                                        view?.postDelayed({
+                                            view.evaluateJavascript(AvisoTaskParser.JS_START_AND_WATCH_VIDEO, null)
+                                        }, 1000L)
+                                    }
+
+                                    // Inject task reader script
+                                    view?.evaluateJavascript(AvisoTaskParser.JS_READER_CODE, null)
                                 }
 
-                                // Inject task reader script
-                                view?.evaluateJavascript(AvisoTaskParser.JS_READER_CODE, null)
-                            }
+                                override fun onReceivedError(
+                                    view: WebView?,
+                                    request: WebResourceRequest?,
+                                    error: WebResourceError?
+                                ) {
+                                    if (request?.isForMainFrame == true) {
+                                        viewModel.setErrorMessage(error?.description?.toString() ?: "পেজ লোড হতে ব্যর্থ হয়েছে")
+                                    }
+                                }
 
-                            override fun onReceivedError(
-                                view: WebView?,
-                                request: WebResourceRequest?,
-                                error: WebResourceError?
-                            ) {
-                                if (request?.isForMainFrame == true) {
-                                    viewModel.setErrorMessage(error?.description?.toString() ?: "পেজ লোড হতে ব্যর্থ হয়েছে")
+                                override fun onReceivedSslError(
+                                    view: WebView?,
+                                    handler: SslErrorHandler?,
+                                    error: SslError?
+                                ) {
+                                    // Proceed to avoid blocking redirects
+                                    handler?.proceed()
                                 }
                             }
 
-                            override fun onReceivedSslError(
-                                view: WebView?,
-                                handler: SslErrorHandler?,
-                                error: SslError?
-                            ) {
-                                // Proceed to avoid blocking redirects
-                                handler?.proceed()
-                            }
+                            loadUrl(uiState.currentUrl)
+                            webViewRef = this
                         }
-
-                        loadUrl(uiState.currentUrl)
-                        webViewRef = this
+                    },
+                    update = { wv ->
+                        webViewRef = wv
+                        canGoBack = wv.canGoBack()
                     }
-                },
-                update = { wv ->
-                    webViewRef = wv
-                    canGoBack = wv.canGoBack()
-                }
-            )
+                )
+            }
 
             // Error Overlay if Connection Fails
             if (uiState.errorMessage != null) {
@@ -1579,6 +1890,15 @@ fun AvisoBrowserScreen(
                 } catch (_: Exception) { }
             }
             webViewRef = null
+            secondaryWebViewRef?.let { wv ->
+                try {
+                    wv.stopLoading()
+                    wv.onPause()
+                    wv.pauseTimers()
+                    wv.destroy()
+                } catch (_: Exception) { }
+            }
+            secondaryWebViewRef = null
         }
     }
 }

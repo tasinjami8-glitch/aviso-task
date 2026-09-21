@@ -137,48 +137,42 @@ object AvisoTaskParser {
 
     /**
      * Injected immediately into every page.
-     * Keeps Aviso session navigation, popups, and YouTube videos inside the same WebView.
+     * Integrates with Android Tab system & handles popups / new tab requests cleanly.
      */
     const val JS_SETUP_OVERRIDE = """
         (function() {
             try {
-                // Ensure all popups, Aviso session viewers, and task links open inside the SAME WebView without leaving Aviso
-                window.open = function(url, target, features) {
-                    if (url && url !== 'about:blank' && url.indexOf('javascript:') === -1) {
-                        // Do not redirect main Aviso window to external YouTube, which breaks the viewer
-                        if (url.indexOf('youtube.com') === -1 && url.indexOf('youtu.be') === -1) {
-                            window.location.href = url;
+                function handleOpenUrl(url) {
+                    if (!url || url === 'about:blank' || url.indexOf('javascript:') === 0) return;
+                    var isYT = (url.indexOf('youtube.com') !== -1 || url.indexOf('youtu.be') !== -1);
+                    var isSession = (url.indexOf('/vl/') !== -1 || url.indexOf('/go/') !== -1 || url.indexOf('create_session') !== -1);
+                    
+                    if (isYT || isSession) {
+                        if (window.AvisoBridge && window.AvisoBridge.openNewTab) {
+                            window.AvisoBridge.openNewTab(url, 20);
+                            return;
+                        } else if (window.AvisoBridge && window.AvisoBridge.openInYouTubeApp) {
+                            window.AvisoBridge.openInYouTubeApp(url);
+                            return;
                         }
+                    }
+                    window.location.href = url;
+                }
+
+                // Override window.open to delegate to Tab system
+                window.open = function(url, target, features) {
+                    if (url) {
+                        handleOpenUrl(url);
                     }
                     return {
                         closed: false,
                         close: function() {},
                         focus: function() {},
                         location: {
-                            set href(val) {
-                                if (val && val !== 'about:blank' && val.indexOf('javascript:') === -1) {
-                                    if (val.indexOf('youtube.com') === -1 && val.indexOf('youtu.be') === -1) {
-                                        window.location.href = val;
-                                    }
-                                }
-                            },
-                            get href() {
-                                return window.location.href;
-                            },
-                            replace: function(val) {
-                                if (val && val !== 'about:blank') {
-                                    if (val.indexOf('youtube.com') === -1 && val.indexOf('youtu.be') === -1) {
-                                        window.location.replace(val);
-                                    }
-                                }
-                            },
-                            assign: function(val) {
-                                if (val && val !== 'about:blank') {
-                                    if (val.indexOf('youtube.com') === -1 && val.indexOf('youtu.be') === -1) {
-                                        window.location.assign(val);
-                                    }
-                                }
-                            }
+                            set href(val) { handleOpenUrl(val); },
+                            get href() { return window.location.href; },
+                            replace: function(val) { handleOpenUrl(val); },
+                            assign: function(val) { handleOpenUrl(val); }
                         },
                         document: {
                             write: function() {},
@@ -187,27 +181,33 @@ object AvisoTaskParser {
                     };
                 };
 
-                // Capture clicks on document: force target="_self" so video/task never leaves the app
+                // Capture clicks on document: if a link opens in new tab/window or YouTube/session, route to Tab system
                 document.addEventListener('click', function(e) {
                     var el = e.target;
                     var a = (el && el.tagName === 'A') ? el : (el && el.closest ? el.closest('a') : null);
                     if (a) {
-                        var href = (a.getAttribute('href') || '').toLowerCase();
-                        if (href.indexOf('youtube.com') !== -1 || href.indexOf('youtu.be') !== -1) {
-                            // Don't redirect top window to YouTube
+                        var href = (a.getAttribute('href') || a.href || '').toString();
+                        var target = (a.getAttribute('target') || '').toLowerCase();
+                        var isYT = (href.indexOf('youtube.com') !== -1 || href.indexOf('youtu.be') !== -1);
+                        var isSession = (href.indexOf('/vl/') !== -1 || href.indexOf('/go/') !== -1 || href.indexOf('create_session') !== -1);
+                        
+                        if (isYT || (target === '_blank' && isSession)) {
                             e.preventDefault();
+                            handleOpenUrl(a.getAttribute('href') || a.href);
                             return;
                         }
-                        a.removeAttribute('target');
-                        a.setAttribute('target', '_self');
                     }
                 }, true);
 
                 function enforceSelfTarget() {
-                    var blankLinks = document.querySelectorAll('a[target="_blank"], a[target="_new"], a[target]');
+                    var blankLinks = document.querySelectorAll('a[target="_blank"], a[target="_new"]');
                     for (var i = 0; i < blankLinks.length; i++) {
-                        blankLinks[i].target = '_self';
-                        blankLinks[i].removeAttribute('target');
+                        var h = (blankLinks[i].getAttribute('href') || blankLinks[i].href || '').toString();
+                        var isYT = (h.indexOf('youtube.com') !== -1 || h.indexOf('youtu.be') !== -1);
+                        if (!isYT) {
+                            blankLinks[i].target = '_self';
+                            blankLinks[i].removeAttribute('target');
+                        }
                     }
                 }
 
@@ -647,29 +647,50 @@ object AvisoTaskParser {
 
                     if (!t && !cls && !oc && !id) return false;
 
+                    if (t.indexOf('отмена') !== -1 || t.indexOf('cancel') !== -1 || t.indexOf('жалоб') !== -1 || t.indexOf('delete') !== -1) {
+                        return false;
+                    }
+
                     if (t.indexOf('подтвердить просмотр') !== -1 ||
                         t.indexOf('подтвердить') !== -1 ||
                         t.indexOf('проверить выполнение') !== -1 ||
+                        t.indexOf('проверить задание') !== -1 ||
+                        t.indexOf('проверить просмотр') !== -1 ||
                         t.indexOf('проверить') !== -1 ||
+                        t.indexOf('забрать награду') !== -1 ||
+                        t.indexOf('забрать деньги') !== -1 ||
                         t.indexOf('забрать') !== -1 ||
                         t.indexOf('получить вознаграждение') !== -1 ||
                         t.indexOf('получить награду') !== -1 ||
+                        t.indexOf('получить деньги') !== -1 ||
+                        t.indexOf('получить оплату') !== -1 ||
                         t.indexOf('получить') !== -1 ||
+                        t.indexOf('клик для подтверждения') !== -1 ||
+                        t.indexOf('нажмите для подтверждения') !== -1 ||
                         t.indexOf('confirm view') !== -1 ||
                         t.indexOf('confirm') !== -1 ||
                         t.indexOf('verify') !== -1 ||
-                        t.indexOf('claim') !== -1) {
+                        t.indexOf('claim') !== -1 ||
+                        t.indexOf('get reward') !== -1 ||
+                        t.indexOf('get money') !== -1) {
                         return true;
                     }
 
                     if (cls.indexOf('btn_confirm') !== -1 ||
                         cls.indexOf('btn_check') !== -1 ||
                         cls.indexOf('confirm-btn') !== -1 ||
+                        cls.indexOf('btn_success') !== -1 ||
+                        cls.indexOf('btn-success') !== -1 ||
+                        cls.indexOf('btn_youtube') !== -1 ||
                         oc.indexOf('confirm') !== -1 ||
                         oc.indexOf('check_task') !== -1 ||
                         oc.indexOf('check_adv') !== -1 ||
+                        oc.indexOf('func_check') !== -1 ||
+                        oc.indexOf('get_money') !== -1 ||
+                        oc.indexOf('confirm_view') !== -1 ||
                         id.indexOf('confirm') !== -1 ||
                         id.indexOf('btn_check') !== -1 ||
+                        id.indexOf('btn-check') !== -1 ||
                         id.indexOf('check') !== -1) {
                         return true;
                     }
@@ -888,29 +909,50 @@ object AvisoTaskParser {
 
                     if (!t && !cls && !oc && !id) return false;
 
+                    if (t.indexOf('отмена') !== -1 || t.indexOf('cancel') !== -1 || t.indexOf('жалоб') !== -1 || t.indexOf('delete') !== -1) {
+                        return false;
+                    }
+
                     if (t.indexOf('подтвердить просмотр') !== -1 ||
                         t.indexOf('подтвердить') !== -1 ||
                         t.indexOf('проверить выполнение') !== -1 ||
+                        t.indexOf('проверить задание') !== -1 ||
+                        t.indexOf('проверить просмотр') !== -1 ||
                         t.indexOf('проверить') !== -1 ||
+                        t.indexOf('забрать награду') !== -1 ||
+                        t.indexOf('забрать деньги') !== -1 ||
                         t.indexOf('забрать') !== -1 ||
                         t.indexOf('получить вознаграждение') !== -1 ||
                         t.indexOf('получить награду') !== -1 ||
+                        t.indexOf('получить деньги') !== -1 ||
+                        t.indexOf('получить оплату') !== -1 ||
                         t.indexOf('получить') !== -1 ||
+                        t.indexOf('клик для подтверждения') !== -1 ||
+                        t.indexOf('нажмите для подтверждения') !== -1 ||
                         t.indexOf('confirm view') !== -1 ||
                         t.indexOf('confirm') !== -1 ||
                         t.indexOf('verify') !== -1 ||
-                        t.indexOf('claim') !== -1) {
+                        t.indexOf('claim') !== -1 ||
+                        t.indexOf('get reward') !== -1 ||
+                        t.indexOf('get money') !== -1) {
                         return true;
                     }
 
                     if (cls.indexOf('btn_confirm') !== -1 ||
                         cls.indexOf('btn_check') !== -1 ||
                         cls.indexOf('confirm-btn') !== -1 ||
+                        cls.indexOf('btn_success') !== -1 ||
+                        cls.indexOf('btn-success') !== -1 ||
+                        cls.indexOf('btn_youtube') !== -1 ||
                         oc.indexOf('confirm') !== -1 ||
                         oc.indexOf('check_task') !== -1 ||
                         oc.indexOf('check_adv') !== -1 ||
+                        oc.indexOf('func_check') !== -1 ||
+                        oc.indexOf('get_money') !== -1 ||
+                        oc.indexOf('confirm_view') !== -1 ||
                         id.indexOf('confirm') !== -1 ||
                         id.indexOf('btn_check') !== -1 ||
+                        id.indexOf('btn-check') !== -1 ||
                         id.indexOf('check') !== -1) {
                         return true;
                     }

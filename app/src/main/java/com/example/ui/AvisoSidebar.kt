@@ -1,5 +1,6 @@
 package com.example.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -45,6 +46,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -296,6 +298,102 @@ fun AvisoSidebar(
                                 onCheckedChange = { viewModel.toggleDesktopMode() },
                                 modifier = Modifier.testTag("desktop_mode_switch")
                             )
+                        }
+                    }
+                }
+
+                // SECTION: Video Watching & Tab Mode Settings (User-requested feature)
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                    ),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Text(
+                            text = "ভিডিও দেখার মোড ও ট্যাব সেটিংস",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // Tab System Option
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (!uiState.openInExternalYouTubeApp) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
+                            border = BorderStroke(1.dp, if (!uiState.openInExternalYouTubeApp) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable {
+                                    if (uiState.openInExternalYouTubeApp) viewModel.toggleExternalYouTubeAppMode()
+                                }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                RadioButton(
+                                    selected = !uiState.openInExternalYouTubeApp,
+                                    onClick = { if (uiState.openInExternalYouTubeApp) viewModel.toggleExternalYouTubeAppMode() }
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Column {
+                                    Text(
+                                        text = "📑 নতুন ট্যাব সিস্টেম (প্রস্তাবিত)",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (!uiState.openInExternalYouTubeApp) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = "ভিডিও চালু হলে নতুন ট্যাবে আসবে, টাইমার শেষ হলে ট্যাবটি একাই কেটে দিয়ে মূল পেজে কনফার্ম করবে।",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.outline,
+                                        lineHeight = 15.sp
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // Direct YouTube App Option
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (uiState.openInExternalYouTubeApp) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
+                            border = BorderStroke(1.dp, if (uiState.openInExternalYouTubeApp) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable {
+                                    if (!uiState.openInExternalYouTubeApp) viewModel.toggleExternalYouTubeAppMode()
+                                }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                RadioButton(
+                                    selected = uiState.openInExternalYouTubeApp,
+                                    onClick = { if (!uiState.openInExternalYouTubeApp) viewModel.toggleExternalYouTubeAppMode() }
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Column {
+                                    Text(
+                                        text = "📱 সরাসরি YouTube App",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (uiState.openInExternalYouTubeApp) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = "সরাসরি YouTube অ্যাপে ভিডিও চলবে, ব্যাকগ্রাউন্ড টাইমার উঠবে এবং সময় শেষ হলে অ্যাপে ফিরে এসে কনফার্ম করবে।",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.outline,
+                                        lineHeight = 15.sp
+                                    )
+                                }
+                            }
                         }
                     }
                 }

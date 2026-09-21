@@ -41,7 +41,15 @@ data class AvisoUiState(
     val isOverlayPermissionGranted: Boolean = false,
     val isBatteryOptimizationExempted: Boolean = false,
     val isNotificationGranted: Boolean = true,
-    val captchaDetectedAlert: String? = null
+    val captchaDetectedAlert: String? = null,
+    // Tab System States
+    val selectedTabIndex: Int = 0, // 0 = Main Aviso, 1 = Video Tab
+    val isVideoTabOpen: Boolean = false,
+    val videoTabUrl: String? = null,
+    val videoTabTitle: String = "ভিডিও প্লেয়ার",
+    val videoTabDuration: Int = 0,
+    val videoTabRemainingSec: Int = 0,
+    val openInExternalYouTubeApp: Boolean = false
 )
 
 class AvisoViewModel : ViewModel() {
@@ -291,5 +299,48 @@ class AvisoViewModel : ViewModel() {
 
     fun openAppSettings(context: Context) {
         AvisoPermissionHelper.openAppSettings(context)
+    }
+
+    fun openVideoTab(url: String, durationSec: Int = 15, title: String = "") {
+        val finalDur = if (durationSec > 0) durationSec else 15
+        _uiState.update {
+            it.copy(
+                isVideoTabOpen = true,
+                selectedTabIndex = 1,
+                videoTabUrl = url,
+                videoTabTitle = if (title.isNotEmpty()) title else "🎬 ভিডিও দেখা হচ্ছে...",
+                videoTabDuration = finalDur,
+                videoTabRemainingSec = finalDur
+            )
+        }
+    }
+
+    fun closeVideoTab() {
+        _uiState.update {
+            it.copy(
+                isVideoTabOpen = false,
+                selectedTabIndex = 0,
+                videoTabUrl = null,
+                videoTabDuration = 0,
+                videoTabRemainingSec = 0
+            )
+        }
+    }
+
+    fun selectTab(index: Int) {
+        _uiState.update { it.copy(selectedTabIndex = index) }
+    }
+
+    fun updateVideoTabCountdown(remainingSec: Int, totalSec: Int) {
+        _uiState.update {
+            it.copy(
+                videoTabRemainingSec = remainingSec,
+                videoTabDuration = totalSec
+            )
+        }
+    }
+
+    fun toggleExternalYouTubeAppMode() {
+        _uiState.update { it.copy(openInExternalYouTubeApp = !it.openInExternalYouTubeApp) }
     }
 }
