@@ -49,15 +49,20 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.MenuOpen
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PlayCircle
@@ -434,6 +439,17 @@ fun AvisoBrowserScreen(
                 delay(1000L)
             }
             Toast.makeText(context, "🎬 ভিডিও দেখা সম্পন্ন হয়েছে! মূল পেজে কনফার্ম করা হয়েছে ✓", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    // Active Standard Tab Switch Listener
+    LaunchedEffect(uiState.activeTabId) {
+        val activeTab = uiState.tabs.find { it.id == uiState.activeTabId }
+        if (activeTab != null && !activeTab.isVideoTab) {
+            val currentLoadedUrl = webViewRef?.url ?: ""
+            if (activeTab.url.isNotEmpty() && currentLoadedUrl.isNotEmpty() && currentLoadedUrl != activeTab.url) {
+                webViewRef?.loadUrl(activeTab.url)
+            }
         }
     }
 
@@ -845,117 +861,148 @@ fun AvisoBrowserScreen(
                     )
                 }
 
-                // Dynamic Tab Header (Shows when Video Tab is open)
-                if (uiState.isVideoTabOpen) {
-                    Surface(
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.85f),
-                        border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
+                // Real Browser Multi-Tab Bar (Chrome style with '+' Add Tab button)
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.95f),
+                    border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("browser_tab_bar_header")
+                ) {
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .testTag("tab_bar_header")
+                            .padding(start = 4.dp, end = 6.dp, top = 4.dp, bottom = 0.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 8.dp, vertical = 4.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        // Scrollable List of Open Tabs
+                        LazyRow(
+                            modifier = Modifier.weight(1f),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // Tab 0: Main Aviso Tab
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = if (uiState.selectedTabIndex == 0) MaterialTheme.colorScheme.surface else Color.Transparent,
-                                border = BorderStroke(
-                                    1.dp,
-                                    if (uiState.selectedTabIndex == 0) MaterialTheme.colorScheme.primary else Color.Transparent
-                                ),
-                                shadowElevation = if (uiState.selectedTabIndex == 0) 2.dp else 0.dp,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .clickable { viewModel.selectTab(0) }
-                                    .testTag("tab_main_aviso")
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.Center
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(8.dp)
-                                            .clip(CircleShape)
-                                            .background(Color(0xFF10B981))
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = "🌐 Aviso.bz",
-                                        fontWeight = if (uiState.selectedTabIndex == 0) FontWeight.Bold else FontWeight.Medium,
-                                        fontSize = 12.sp,
-                                        color = if (uiState.selectedTabIndex == 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            }
-
-                            // Tab 1: Video Tab (With live timer & close button)
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = if (uiState.selectedTabIndex == 1) MaterialTheme.colorScheme.primaryContainer else Color(0xFFFFEBEE).copy(alpha = 0.9f),
-                                border = BorderStroke(
-                                    1.dp,
-                                    if (uiState.selectedTabIndex == 1) MaterialTheme.colorScheme.primary else Color(0xFFEF5350).copy(alpha = 0.5f)
-                                ),
-                                shadowElevation = if (uiState.selectedTabIndex == 1) 3.dp else 0.dp,
-                                modifier = Modifier
-                                    .weight(1.3f)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .clickable { viewModel.selectTab(1) }
-                                    .testTag("tab_video_player")
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
+                            items(uiState.tabs, key = { it.id }) { tab ->
+                                val isActive = tab.id == uiState.activeTabId
+                                Surface(
+                                    shape = RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp, bottomStart = 2.dp, bottomEnd = 2.dp),
+                                    color = if (isActive) {
+                                        if (tab.isVideoTab) Color(0xFF1E293B) else MaterialTheme.colorScheme.surface
+                                    } else {
+                                        if (tab.isVideoTab) Color(0xFFFFEBEE).copy(alpha = 0.85f) else MaterialTheme.colorScheme.surface.copy(alpha = 0.45f)
+                                    },
+                                    border = BorderStroke(
+                                        1.dp,
+                                        if (isActive) {
+                                            if (tab.isVideoTab) Color(0xFFEF4444) else MaterialTheme.colorScheme.primary
+                                        } else {
+                                            MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)
+                                        }
+                                    ),
+                                    shadowElevation = if (isActive) 2.dp else 0.dp,
+                                    modifier = Modifier
+                                        .widthIn(min = 100.dp, max = 160.dp)
+                                        .height(34.dp)
+                                        .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp, bottomStart = 2.dp, bottomEnd = 2.dp))
+                                        .clickable {
+                                            viewModel.selectTabById(tab.id)
+                                        }
+                                        .testTag("tab_item_${tab.id}")
                                 ) {
                                     Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier.weight(1f)
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(8.dp)
-                                                .clip(CircleShape)
-                                                .background(Color(0xFFEF4444))
-                                        )
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text(
-                                            text = "🎬 ভিডিও (${uiState.videoTabRemainingSec}s)",
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 12.sp,
-                                            color = if (uiState.selectedTabIndex == 1) MaterialTheme.colorScheme.onPrimaryContainer else Color(0xFFC62828),
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                    }
-
-                                    // Close Tab Button
-                                    IconButton(
-                                        onClick = {
-                                            viewModel.closeVideoTab()
-                                            viewModel.selectTab(0)
-                                        },
                                         modifier = Modifier
-                                            .size(22.dp)
-                                            .testTag("close_video_tab_button")
+                                            .fillMaxSize()
+                                            .padding(horizontal = 8.dp, vertical = 2.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
                                     ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Close,
-                                            contentDescription = "ট্যাব বন্ধ করুন",
-                                            tint = Color(0xFFD32F2F),
-                                            modifier = Modifier.size(14.dp)
-                                        )
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            if (tab.isVideoTab) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(7.dp)
+                                                        .clip(CircleShape)
+                                                        .background(Color(0xFFEF4444))
+                                                )
+                                                Spacer(modifier = Modifier.width(5.dp))
+                                                Text(
+                                                    text = if (tab.remainingSec > 0) "🎬 ${tab.remainingSec}s" else "🎬 ভিডিও",
+                                                    fontSize = 11.5.sp,
+                                                    fontWeight = if (isActive) FontWeight.Bold else FontWeight.Medium,
+                                                    color = if (isActive) Color(0xFFF87171) else Color(0xFFDC2626),
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            } else {
+                                                Icon(
+                                                    imageVector = Icons.Default.Language,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(13.dp),
+                                                    tint = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                                Spacer(modifier = Modifier.width(5.dp))
+                                                Text(
+                                                    text = tab.title.ifEmpty { "Aviso.bz" },
+                                                    fontSize = 11.5.sp,
+                                                    fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
+                                                    color = if (isActive) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                        }
+
+                                        // Close tab button (✕)
+                                        if (uiState.tabs.size > 1 || tab.isVideoTab) {
+                                            IconButton(
+                                                onClick = {
+                                                    if (tab.isVideoTab) {
+                                                        viewModel.closeVideoTab()
+                                                    } else {
+                                                        viewModel.closeTabById(tab.id)
+                                                    }
+                                                },
+                                                modifier = Modifier
+                                                    .size(20.dp)
+                                                    .testTag("close_tab_${tab.id}")
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Close,
+                                                    contentDescription = "ট্যাব বন্ধ করুন",
+                                                    tint = if (tab.isVideoTab) Color(0xFFEF4444) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                                    modifier = Modifier.size(12.dp)
+                                                )
+                                            }
+                                        }
                                     }
                                 }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.width(4.dp))
+
+                        // Browser '+' Add New Tab Button
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f),
+                            modifier = Modifier
+                                .size(28.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .clickable {
+                                    val newId = viewModel.addNewTab("https://aviso.bz/tasks-youtube", "ট্যাব ${uiState.tabs.size + 1}")
+                                    Toast.makeText(context, "নতুন ট্যাব খোলা হয়েছে (+)", Toast.LENGTH_SHORT).show()
+                                }
+                                .testTag("btn_browser_add_tab")
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Add,
+                                    contentDescription = "নতুন ট্যাব যোগ করুন",
+                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    modifier = Modifier.size(18.dp)
+                                )
                             }
                         }
                     }
@@ -968,8 +1015,11 @@ fun AvisoBrowserScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            // Tab 2 (Video Player Tab View)
-            if (uiState.selectedTabIndex == 1 && uiState.isVideoTabOpen && !uiState.videoTabUrl.isNullOrEmpty()) {
+            val activeTab = uiState.tabs.find { it.id == uiState.activeTabId }
+            val isCurrentTabVideo = (activeTab?.isVideoTab == true || uiState.selectedTabIndex == 1) && uiState.isVideoTabOpen && !uiState.videoTabUrl.isNullOrEmpty()
+
+            // Video Player Tab View (When active tab is video)
+            if (isCurrentTabVideo) {
                 Column(
                     modifier = Modifier
                         .fillMaxSize()

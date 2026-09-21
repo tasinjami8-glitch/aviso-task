@@ -29,3 +29,13 @@ data class AvisoSettings(
     val soundEnabled: Boolean = true,
     val vibrationEnabled: Boolean = true
 )
+
+data class BrowserTab(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val title: String = "Aviso.bz",
+    val url: String = "https://aviso.bz/tasks-youtube",
+    val isVideoTab: Boolean = false,
+    val durationSec: Int = 0,
+    val remainingSec: Int = 0
+)
+

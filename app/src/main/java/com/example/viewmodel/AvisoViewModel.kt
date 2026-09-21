@@ -3,6 +3,7 @@ package com.example.viewmodel
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.model.BrowserTab
 import com.example.model.TaskScanResult
 import com.example.service.AvisoTaskMonitorService
 import com.example.util.AvisoNotificationHelper
@@ -42,11 +43,15 @@ data class AvisoUiState(
     val isBatteryOptimizationExempted: Boolean = false,
     val isNotificationGranted: Boolean = true,
     val captchaDetectedAlert: String? = null,
-    // Tab System States
-    val selectedTabIndex: Int = 0, // 0 = Main Aviso, 1 = Video Tab
+    // Real Browser Multi-Tab System
+    val tabs: List<BrowserTab> = listOf(
+        BrowserTab(id = "tab_main_aviso", title = "Aviso.bz", url = "https://aviso.bz/tasks-youtube")
+    ),
+    val activeTabId: String = "tab_main_aviso",
+    val selectedTabIndex: Int = 0, // backwards compat
     val isVideoTabOpen: Boolean = false,
     val videoTabUrl: String? = null,
-    val videoTabTitle: String = "ভিডিও প্লেয়ার",
+    val videoTabTitle: String = "🎬 ভিডিও",
     val videoTabDuration: Int = 0,
     val videoTabRemainingSec: Int = 0,
     val openInExternalYouTubeApp: Boolean = false
@@ -301,14 +306,116 @@ class AvisoViewModel : ViewModel() {
         AvisoPermissionHelper.openAppSettings(context)
     }
 
+    fun addNewTab(url: String = "https://aviso.bz/tasks-youtube", title: String = "নতুন ট্যাব"): String {
+        val newId = "tab_" + System.currentTimeMillis()
+        val newTab = BrowserTab(
+            id = newId,
+            title = title,
+            url = url
+        )
+        _uiState.update { current ->
+            val updatedTabs = current.tabs + newTab
+            val newIdx = updatedTabs.indexOfFirst { it.id == newId }.coerceAtLeast(0)
+            current.copy(
+                tabs = updatedTabs,
+                activeTabId = newId,
+                selectedTabIndex = newIdx
+            )
+        }
+        return newId
+    }
+
+    fun selectTabById(tabId: String) {
+        _uiState.update { current ->
+            val index = current.tabs.indexOfFirst { it.id == tabId }
+            val tab = current.tabs.find { it.id == tabId }
+            current.copy(
+                activeTabId = tabId,
+                selectedTabIndex = if (index >= 0) index else 0,
+                isVideoTabOpen = tab?.isVideoTab == true,
+                videoTabUrl = if (tab?.isVideoTab == true) tab.url else current.videoTabUrl,
+                videoTabTitle = if (tab?.isVideoTab == true) tab.title else current.videoTabTitle,
+                videoTabDuration = if (tab?.isVideoTab == true) tab.durationSec else current.videoTabDuration,
+                videoTabRemainingSec = if (tab?.isVideoTab == true) tab.remainingSec else current.videoTabRemainingSec
+            )
+        }
+    }
+
+    fun closeTabById(tabId: String) {
+        _uiState.update { current ->
+            val remainingTabs = current.tabs.filterNot { it.id == tabId }
+            val newTabs = if (remainingTabs.isEmpty()) {
+                listOf(BrowserTab(id = "tab_main_aviso", title = "Aviso.bz", url = "https://aviso.bz/tasks-youtube"))
+            } else {
+                remainingTabs
+            }
+            val newActiveId = if (current.activeTabId == tabId) {
+                newTabs.last().id
+            } else {
+                if (newTabs.any { it.id == current.activeTabId }) current.activeTabId else newTabs.first().id
+            }
+            val newActiveTab = newTabs.find { it.id == newActiveId }
+            val newIndex = newTabs.indexOfFirst { it.id == newActiveId }.coerceAtLeast(0)
+            current.copy(
+                tabs = newTabs,
+                activeTabId = newActiveId,
+                selectedTabIndex = newIndex,
+                isVideoTabOpen = newTabs.any { it.isVideoTab },
+                videoTabUrl = if (newActiveTab?.isVideoTab == true) newActiveTab.url else null,
+                videoTabRemainingSec = if (newActiveTab?.isVideoTab == true) newActiveTab.remainingSec else 0
+            )
+        }
+    }
+
+    fun updateTabInfo(tabId: String, title: String? = null, url: String? = null) {
+        _uiState.update { current ->
+            val updated = current.tabs.map { tab ->
+                if (tab.id == tabId) {
+                    tab.copy(
+                        title = title ?: tab.title,
+                        url = url ?: tab.url
+                    )
+                } else tab
+            }
+            current.copy(tabs = updated)
+        }
+    }
+
     fun openVideoTab(url: String, durationSec: Int = 15, title: String = "") {
         val finalDur = if (durationSec > 0) durationSec else 15
-        _uiState.update {
-            it.copy(
+        val videoTitle = if (title.isNotEmpty()) title else "🎬 ভিডিও ($finalDur s)"
+        _uiState.update { current ->
+            val existingVideoTab = current.tabs.find { it.isVideoTab }
+            val updatedTabs = if (existingVideoTab != null) {
+                current.tabs.map {
+                    if (it.id == existingVideoTab.id) {
+                        it.copy(
+                            url = url,
+                            title = videoTitle,
+                            durationSec = finalDur,
+                            remainingSec = finalDur
+                        )
+                    } else it
+                }
+            } else {
+                current.tabs + BrowserTab(
+                    id = "tab_video_" + System.currentTimeMillis(),
+                    title = videoTitle,
+                    url = url,
+                    isVideoTab = true,
+                    durationSec = finalDur,
+                    remainingSec = finalDur
+                )
+            }
+            val activeId = existingVideoTab?.id ?: updatedTabs.last().id
+            val idx = updatedTabs.indexOfFirst { it.id == activeId }.coerceAtLeast(0)
+            current.copy(
+                tabs = updatedTabs,
+                activeTabId = activeId,
+                selectedTabIndex = idx,
                 isVideoTabOpen = true,
-                selectedTabIndex = 1,
                 videoTabUrl = url,
-                videoTabTitle = if (title.isNotEmpty()) title else "🎬 ভিডিও দেখা হচ্ছে...",
+                videoTabTitle = videoTitle,
                 videoTabDuration = finalDur,
                 videoTabRemainingSec = finalDur
             )
@@ -316,10 +423,20 @@ class AvisoViewModel : ViewModel() {
     }
 
     fun closeVideoTab() {
-        _uiState.update {
-            it.copy(
+        _uiState.update { current ->
+            val remainingTabs = current.tabs.filterNot { it.isVideoTab }
+            val newTabs = if (remainingTabs.isEmpty()) {
+                listOf(BrowserTab(id = "tab_main_aviso", title = "Aviso.bz", url = "https://aviso.bz/tasks-youtube"))
+            } else {
+                remainingTabs
+            }
+            val mainTab = newTabs.firstOrNull { it.id == "tab_main_aviso" } ?: newTabs.first()
+            val idx = newTabs.indexOfFirst { it.id == mainTab.id }.coerceAtLeast(0)
+            current.copy(
+                tabs = newTabs,
+                activeTabId = mainTab.id,
+                selectedTabIndex = idx,
                 isVideoTabOpen = false,
-                selectedTabIndex = 0,
                 videoTabUrl = null,
                 videoTabDuration = 0,
                 videoTabRemainingSec = 0
@@ -328,14 +445,28 @@ class AvisoViewModel : ViewModel() {
     }
 
     fun selectTab(index: Int) {
-        _uiState.update { it.copy(selectedTabIndex = index) }
+        val tabs = _uiState.value.tabs
+        if (index in tabs.indices) {
+            selectTabById(tabs[index].id)
+        }
     }
 
     fun updateVideoTabCountdown(remainingSec: Int, totalSec: Int) {
-        _uiState.update {
-            it.copy(
+        _uiState.update { current ->
+            val updatedTabs = current.tabs.map { tab ->
+                if (tab.isVideoTab) {
+                    tab.copy(
+                        remainingSec = remainingSec,
+                        durationSec = totalSec,
+                        title = if (remainingSec > 0) "🎬 ভিডিও (${remainingSec}s)" else "🎬 ভিডিও শেষ"
+                    )
+                } else tab
+            }
+            current.copy(
+                tabs = updatedTabs,
                 videoTabRemainingSec = remainingSec,
-                videoTabDuration = totalSec
+                videoTabDuration = totalSec,
+                videoTabTitle = if (remainingSec > 0) "🎬 ভিডিও (${remainingSec}s)" else "🎬 ভিডিও শেষ"
             )
         }
     }
