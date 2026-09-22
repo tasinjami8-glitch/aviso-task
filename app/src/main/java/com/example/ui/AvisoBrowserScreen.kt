@@ -411,13 +411,15 @@ fun AvisoBrowserScreen(
         val total = manualWatchTotal ?: return@LaunchedEffect
         if (uiState.isAutoWorkRunning) return@LaunchedEffect
 
-        var rem = total
-        AvisoNotificationHelper.showAutoWorkProgressNotification(context, rem, total)
+        val fullDurationWithBuffer = total + 2 // +2 seconds extra wait as requested
+        var rem = fullDurationWithBuffer
+        AvisoNotificationHelper.showAutoWorkProgressNotification(context, rem, fullDurationWithBuffer)
         while (rem > 0 && !uiState.isAutoWorkRunning) {
             manualWatchCountdown = rem
-            AvisoNotificationHelper.showAutoWorkProgressNotification(context, rem, total)
+            AvisoNotificationHelper.showAutoWorkProgressNotification(context, rem, fullDurationWithBuffer)
             // Ensure video playback is triggered and unmuted
             webViewRef?.evaluateJavascript(AvisoTaskParser.JS_START_AND_WATCH_VIDEO, null)
+            secondaryWebViewRef?.evaluateJavascript(AvisoTaskParser.JS_START_AND_WATCH_VIDEO, null)
             delay(1000L)
             rem--
         }
@@ -426,11 +428,13 @@ fun AvisoBrowserScreen(
         bringAppToFront(context)
         AvisoNotificationHelper.sendAutoWorkFinishedNotification(context)
         if (!uiState.isAutoWorkRunning) {
-            delay(1000L)
-            for (attempt in 1..4) {
+            delay(1500L)
+            for (attempt in 1..10) {
                 webViewRef?.evaluateJavascript(AvisoTaskParser.JS_AUTO_WORK_CLICK_CONFIRM, null)
                 webViewRef?.evaluateJavascript(AvisoTaskParser.JS_START_AND_WATCH_VIDEO, null)
-                delay(1000L)
+                secondaryWebViewRef?.evaluateJavascript(AvisoTaskParser.JS_AUTO_WORK_CLICK_CONFIRM, null)
+                secondaryWebViewRef?.evaluateJavascript(AvisoTaskParser.JS_START_AND_WATCH_VIDEO, null)
+                delay(800L)
             }
             Toast.makeText(context, "🎬 ভিডিও দেখা সম্পন্ন ও কনফার্ম করা হয়েছে ✓", Toast.LENGTH_SHORT).show()
         }
@@ -444,7 +448,8 @@ fun AvisoBrowserScreen(
         if (!uiState.isVideoTabOpen || uiState.videoTabUrl.isNullOrEmpty()) {
             return@LaunchedEffect
         }
-        val totalSec = if (uiState.videoTabDuration > 0) uiState.videoTabDuration else 20
+        val taskSec = if (uiState.videoTabDuration > 0) uiState.videoTabDuration else 20
+        val totalSec = taskSec + 2 // +2 seconds extra buffer
         var remaining = totalSec
         viewModel.updateVideoTabCountdown(remaining, totalSec)
 
@@ -461,17 +466,30 @@ fun AvisoBrowserScreen(
             bringAppToFront(context)
             AvisoNotificationHelper.sendAutoWorkFinishedNotification(context)
 
-            // Auto-close Video Tab and switch back to Aviso Tasks Tab
+            // Step 1: Wait 1.5s for DOM timer to finish and render "Подтвердить просмотр"
+            delay(1500L)
+
+            // Step 2: Auto click confirm on BOTH secondary WebView (the /vl/ video tab) and main WebView!
+            for (attempt in 1..10) {
+                secondaryWebViewRef?.evaluateJavascript(AvisoTaskParser.JS_AUTO_WORK_CLICK_CONFIRM, null)
+                secondaryWebViewRef?.evaluateJavascript(AvisoTaskParser.JS_START_AND_WATCH_VIDEO, null)
+                webViewRef?.evaluateJavascript(AvisoTaskParser.JS_AUTO_WORK_CLICK_CONFIRM, null)
+                webViewRef?.evaluateJavascript(AvisoTaskParser.JS_START_AND_WATCH_VIDEO, null)
+                delay(800L)
+            }
+
+            Toast.makeText(context, "🎬 ভিডিও দেখা সম্পন্ন ও কনফার্ম করা হয়েছে ✓", Toast.LENGTH_SHORT).show()
+
+            // Step 3: Wait 3 seconds so the user and page display the reward confirmation
+            delay(3000L)
+
+            // Step 4: Now safely close Video Tab and switch back to Aviso Tasks Tab
             viewModel.closeVideoTab()
             viewModel.selectTab(0)
 
-            delay(1000L)
-            // Auto click confirm on Main Aviso WebView
-            for (attempt in 1..4) {
-                webViewRef?.evaluateJavascript(AvisoTaskParser.JS_AUTO_WORK_CLICK_CONFIRM, null)
-                delay(1000L)
-            }
-            Toast.makeText(context, "🎬 ভিডিও দেখা সম্পন্ন হয়েছে! মূল পেজে কনফার্ম করা হয়েছে ✓", Toast.LENGTH_SHORT).show()
+            // Refresh tasks list on main tab
+            delay(500L)
+            webViewRef?.evaluateJavascript(AvisoTaskParser.JS_READER_CODE, null)
         }
     }
 
@@ -575,50 +593,38 @@ fun AvisoBrowserScreen(
                 }
             }
 
-            var expectedDuration = (realInterstitialDurationSignal ?: autoWorkTaskStartedSignal ?: 15).coerceAtLeast(5)
-            viewModel.setAutoWorkStatus("ভিডিও দেখা হচ্ছে ($expectedDuration সেক)...")
+            var taskDuration = (realInterstitialDurationSignal ?: autoWorkTaskStartedSignal ?: 15).coerceAtLeast(5)
+            val totalDurationWithBuffer = taskDuration + 2 // +2 seconds extra wait buffer as requested
+            viewModel.setAutoWorkStatus("ভিডিও দেখা হচ্ছে ($totalDurationWithBuffer সেক)...")
 
             // Allow video player / page to load
             delay(1000L)
 
             // Step 2: Active Video Watching & Background Countdown Loop
-            var remainingSec = expectedDuration
-            var lastObservedRealTimer = realTimerSecondsSignal
+            var remainingSec = totalDurationWithBuffer
             var elapsedSec = 0
 
-            while (uiState.isAutoWorkRunning && !taskCompletedSignal) {
-                if (realInterstitialDurationSignal != null && realInterstitialDurationSignal!! > expectedDuration) {
+            while (uiState.isAutoWorkRunning && remainingSec > 0) {
+                if (realInterstitialDurationSignal != null && realInterstitialDurationSignal!! > taskDuration) {
                     val newDur = realInterstitialDurationSignal!!
-                    if (newDur > expectedDuration) {
-                        val diff = newDur - expectedDuration
+                    if (newDur > taskDuration) {
+                        val diff = newDur - taskDuration
                         remainingSec += diff
-                        expectedDuration = newDur
+                        taskDuration = newDur
                     }
-                }
-
-                // If website's live timer is actively updating, sync remainingSec
-                if (realTimerSecondsSignal > 0 && realTimerSecondsSignal != lastObservedRealTimer) {
-                    lastObservedRealTimer = realTimerSecondsSignal
-                    remainingSec = realTimerSecondsSignal
-                } else {
-                    remainingSec = (remainingSec - 1).coerceAtLeast(0)
                 }
 
                 // Continuously execute watcher to ensure playback & timer tracking
                 webViewRef?.evaluateJavascript(AvisoTaskParser.JS_START_AND_WATCH_VIDEO, null)
 
                 // Update countdown display in UI
-                viewModel.updateAutoWorkCountdown(remainingSec, expectedDuration)
+                viewModel.updateAutoWorkCountdown(remainingSec, totalDurationWithBuffer)
 
                 // Show live background notification in Android status bar (works even in YouTube app / background)
-                AvisoNotificationHelper.showAutoWorkProgressNotification(context, remainingSec, expectedDuration)
-
-                // If countdown reached 0 or task was marked completed
-                if (remainingSec == 0 || realTimerSecondsSignal == 0 || taskCompletedSignal) {
-                    break
-                }
+                AvisoNotificationHelper.showAutoWorkProgressNotification(context, remainingSec, totalDurationWithBuffer)
 
                 delay(1000L)
+                remainingSec--
                 elapsedSec++
             }
 
@@ -626,22 +632,24 @@ fun AvisoBrowserScreen(
                 AvisoNotificationHelper.cancelAutoWorkProgressNotification(context)
                 break
             }
-            viewModel.updateAutoWorkCountdown(0, expectedDuration)
+            viewModel.updateAutoWorkCountdown(0, totalDurationWithBuffer)
 
             // Step 3: Return from YouTube app / background to Aviso app and click Confirm
             // Automatically bring our app back to the front screen
             bringAppToFront(context)
             AvisoNotificationHelper.sendAutoWorkFinishedNotification(context)
 
-            // Brief delay to allow WebView to regain focus and resume rendering
-            delay(1200L)
+            // Allow 1.5 seconds for WebView to resume rendering and show the confirm button
+            delay(1500L)
 
             viewModel.setAutoWorkStatus("টাস্ক নিশ্চিতকরণ (Confirm View) করা হচ্ছে...")
             var isConfirmed = false
-            for (attempt in 1..4) {
+            for (attempt in 1..10) {
                 webViewRef?.evaluateJavascript(AvisoTaskParser.JS_AUTO_WORK_CLICK_CONFIRM, null)
                 webViewRef?.evaluateJavascript(AvisoTaskParser.JS_START_AND_WATCH_VIDEO, null)
-                delay(1200L)
+                secondaryWebViewRef?.evaluateJavascript(AvisoTaskParser.JS_AUTO_WORK_CLICK_CONFIRM, null)
+                secondaryWebViewRef?.evaluateJavascript(AvisoTaskParser.JS_START_AND_WATCH_VIDEO, null)
+                delay(800L)
                 if (taskCompletedSignal || confirmClickedSignal) {
                     isConfirmed = true
                     break
@@ -670,9 +678,10 @@ fun AvisoBrowserScreen(
                     delay(3000L)
                 }
             } else {
-                viewModel.setAutoWorkStatus("কাজ সম্পন্ন হয়েছে! পরবর্তী কাজে যাওয়া হচ্ছে...")
                 delay(1500L)
             }
+            viewModel.setAutoWorkStatus("কাজ সম্পন্ন হয়েছে! পরবর্তী কাজে যাওয়া হচ্ছে...")
+            delay(1500L)
 
             // Step 5: Brief interval before scanning next task
             delay(1000L)
@@ -1242,11 +1251,14 @@ fun AvisoBrowserScreen(
                                         private fun handleNewWindow(targetUrl: String) {
                                             if (targetUrl.isNotEmpty() && targetUrl != "about:blank") {
                                                 mainWv.post {
-                                                    if (targetUrl.contains("youtube.com") || targetUrl.contains("youtu.be") || targetUrl.contains("/vl/") || targetUrl.contains("/go/") || targetUrl.contains("create_session") || targetUrl.contains("youtube.php")) {
+                                                    if (targetUrl.contains("youtube.com") || targetUrl.contains("youtu.be")) {
                                                         if (uiState.openInExternalYouTubeApp) {
                                                             launchYouTubeApp(ctx, targetUrl)
+                                                        } else {
+                                                            viewModel.openVideoTab(targetUrl, 20)
                                                         }
-                                                        viewModel.openVideoTab(targetUrl, 20)
+                                                    } else if (targetUrl.contains("aviso.bz")) {
+                                                        mainWv.loadUrl(targetUrl)
                                                     } else {
                                                         viewModel.addNewTab(targetUrl, "ট্যাব ${uiState.tabs.size + 1}")
                                                     }
@@ -1284,11 +1296,12 @@ fun AvisoBrowserScreen(
                                             val intent = Intent.parseUri(url, Intent.URI_INTENT_SCHEME)
                                             val fallback = intent.getStringExtra("browser_fallback_url")
                                             val target = if (!fallback.isNullOrEmpty()) fallback else url
-                                            if (target.contains("youtube.com") || target.contains("youtu.be") || target.contains("/vl/") || target.contains("/go/")) {
+                                            if (target.contains("youtube.com") || target.contains("youtu.be")) {
                                                 if (uiState.openInExternalYouTubeApp) {
                                                     launchYouTubeApp(ctx, target)
+                                                } else {
+                                                    viewModel.openVideoTab(target, 20)
                                                 }
-                                                viewModel.openVideoTab(target, 20)
                                                 return true
                                             }
                                             if (!fallback.isNullOrEmpty() && fallback.contains("aviso.bz")) {
@@ -1300,15 +1313,20 @@ fun AvisoBrowserScreen(
                                         return true
                                     }
 
-                                    // Intercept YouTube & Video Task URLs into dedicated Video Tab
+                                    // Intercept direct YouTube URLs
                                     val isYT = url.contains("youtube.com") || url.contains("youtu.be")
-                                    val isVideoTaskLink = url.contains("/vl/") || url.contains("/go/") || url.contains("create_session") || url.contains("youtube.php")
-                                    if (isYT || isVideoTaskLink) {
+                                    if (isYT) {
                                         if (uiState.openInExternalYouTubeApp) {
                                             launchYouTubeApp(ctx, url)
+                                        } else {
+                                            viewModel.openVideoTab(url, 20)
                                         }
-                                        viewModel.openVideoTab(url, 20)
-                                        return true // Stop main Aviso page from being replaced
+                                        return true // Stop main Aviso page from navigating away to YouTube site
+                                    }
+
+                                    // All Aviso.bz internal pages (tasks, /vl/, /go/, session, player) MUST load directly in this WebView
+                                    if (url.contains("aviso.bz")) {
+                                        return false
                                     }
 
                                     // For other URLs
@@ -1328,20 +1346,18 @@ fun AvisoBrowserScreen(
                                 override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                                     val currentUrlStr = url.orEmpty()
                                     val isYT = currentUrlStr.contains("youtube.com") || currentUrlStr.contains("youtu.be")
-                                    val isVideoTaskLink = currentUrlStr.contains("/vl/") || currentUrlStr.contains("/go/") || currentUrlStr.contains("create_session") || currentUrlStr.contains("youtube.php")
 
-                                    // Safety fallback: if somehow main tab navigated to YouTube, stop and route to Video Tab
-                                    if (isYT || isVideoTaskLink) {
+                                    // Safety fallback: if somehow main tab navigated to YouTube domain directly
+                                    if (isYT) {
                                         view?.stopLoading()
                                         if (view?.canGoBack() == true) {
                                             view.goBack()
-                                        } else {
-                                            view?.loadUrl("https://aviso.bz/tasks-youtube")
                                         }
                                         if (uiState.openInExternalYouTubeApp) {
                                             launchYouTubeApp(ctx, currentUrlStr)
+                                        } else {
+                                            viewModel.openVideoTab(currentUrlStr, 20)
                                         }
-                                        viewModel.openVideoTab(currentUrlStr, 20)
                                         return
                                     }
 

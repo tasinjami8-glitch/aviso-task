@@ -875,16 +875,16 @@ object AvisoTaskParser {
                     for (var cb = 0; cb < confirmBtns.length; cb++) {
                         var cEl = confirmBtns[cb];
                         if (isConfirmBtn(cEl)) {
-                            // Scroll button into clear view for user
-                            try { cEl.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch(e) {}
-                            // If countdown is finished, trigger click
-                            if (realSec <= 0 && cEl.offsetParent !== null) {
-                                safeClick(cEl);
-                                if (window.AvisoBridge && window.AvisoBridge.onTaskCompleted) {
-                                    window.AvisoBridge.onTaskCompleted();
-                                }
-                                return;
+                            // Scroll button into clear view and click immediately
+                            try { cEl.scrollIntoView({ behavior: 'instant', block: 'center' }); } catch(e) {}
+                            safeClick(cEl);
+                            if (window.AvisoBridge && window.AvisoBridge.onAutoWorkConfirmClicked) {
+                                window.AvisoBridge.onAutoWorkConfirmClicked(true);
                             }
+                            if (window.AvisoBridge && window.AvisoBridge.onTaskCompleted) {
+                                window.AvisoBridge.onTaskCompleted();
+                            }
+                            return;
                         }
                     }
                 }
