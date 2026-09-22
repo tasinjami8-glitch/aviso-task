@@ -394,14 +394,25 @@ object AvisoTaskParser {
                     return false;
                 }
 
-                function extractDuration(text) {
+                function extractDurationFromRow(rowEl, text) {
+                    if (rowEl) {
+                        // Check right-side cells and badges first
+                        var rightCells = rowEl.querySelectorAll('td:last-child, td:nth-last-child(1), td:nth-last-child(2), .badge, .time, .sec, span[class*="sec"], span[class*="time"], div[class*="time"]');
+                        for (var rc = 0; rc < rightCells.length; rc++) {
+                            var rct = (rightCells[rc].innerText || rightCells[rc].textContent || '').trim();
+                            var mS0 = rct.match(/(\d+)\s*(?:сек|sec|секунд|с\b|s\b)/i);
+                            if (mS0) return parseInt(mS0[1], 10);
+                            var mNum = rct.match(/^(\d+)$/);
+                            if (mNum) return parseInt(mNum[1], 10);
+                        }
+                    }
                     var t = text || '';
                     var mMS = t.match(/(\d+)\s*(?:minute|min|минут)[s]?\s*(?:and\s*)?(\d+)\s*(?:second|sec|секунд)[s]?/i);
                     if (mMS) return (parseInt(mMS[1], 10) || 0) * 60 + (parseInt(mMS[2], 10) || 0);
                     var mM = t.match(/(\d+)\s*(?:minute|min|минут)[s]?/i);
                     if (mM) return (parseInt(mM[1], 10) || 0) * 60;
                     var mS = t.match(/(\d+)\s*(?:сек|sec|секунд|с\b|s\b)/i);
-                    if (mS) return parseInt(mS[1], 10) || 20;
+                    if (mS) return parseInt(mS[1], 10);
                     return window._avisoLastExtractedSec || 20;
                 }
 
@@ -425,7 +436,7 @@ object AvisoTaskParser {
                     textLower.indexOf('начать просмотр') !== -1
                 );
                 if (isDirectInterstitial) {
-                    var interSec = extractDuration(textLower);
+                    var interSec = extractDurationFromRow(null, textLower);
                     var interBtns = document.querySelectorAll('button, a, input[type="button"], div[role="button"], span[role="button"], div, span');
                     for (var ib = 0; ib < interBtns.length; ib++) {
                         var ibTxt = (interBtns[ib].innerText || interBtns[ib].value || '').trim().toLowerCase();
@@ -455,7 +466,7 @@ object AvisoTaskParser {
                     }
                 }
                 if (globalStartBtn) {
-                    var gDur = extractDuration(globalStartRow ? globalStartRow.innerText : '');
+                    var gDur = extractDurationFromRow(globalStartRow, globalStartRow ? globalStartRow.innerText : '');
                     safeClick(globalStartBtn);
                     if (window.AvisoBridge && window.AvisoBridge.onAutoWorkTaskStarted) {
                         window.AvisoBridge.onAutoWorkTaskStarted(gDur);
@@ -484,7 +495,7 @@ object AvisoTaskParser {
                         continue;
                     }
 
-                    var sec = extractDuration(rText);
+                    var sec = extractDurationFromRow(row, rText);
 
                     // Check if row ALREADY has "Приступить к просмотру" visible
                     var rowEls = row.querySelectorAll('button, a, input[type="button"], span, div');
@@ -864,13 +875,14 @@ object AvisoTaskParser {
                     try {
                         ifr.contentWindow.postMessage('{"event":"command","func":"playVideo","args":""}', '*');
                         ifr.contentWindow.postMessage('{"event":"command","func":"unMute","args":""}', '*');
+                        ifr.contentWindow.postMessage('{"event":"command","func":"setVolume","args":[100]}', '*');
                         ifr.contentWindow.postMessage('{"event":"listening","id":1,"channel":"widget"}', '*');
                     } catch(e) {}
                 }
 
                 // Click play overlay / buttons with full simulated touch & mouse events
                 for (var dPlay = 0; dPlay < docs.length; dPlay++) {
-                    var startButtons = docs[dPlay].querySelectorAll('#video-click, .video-click, #start_video, .start-video, .ytp-large-play-button, button.ytp-large-play-button, .ytp-play-button, button.btn-play, [class*="play_btn"], a[onclick*="start"], button[onclick*="start"], .ytp-cuj-button, .video-stream');
+                    var startButtons = docs[dPlay].querySelectorAll('#video-click, .video-click, #start_video, .start-video, .ytp-large-play-button, button.ytp-large-play-button, .ytp-play-button, button.btn-play, [class*="play_btn"], a[onclick*="start"], button[onclick*="start"], .ytp-cuj-button, .video-stream, button[aria-label*="Play"], button[aria-label*="Воспроизвести"], [aria-label*="Play"], [aria-label*="Воспроизвести"]');
                     for (var s = 0; s < startButtons.length; s++) {
                         try {
                             var btn = startButtons[s];
@@ -1172,6 +1184,85 @@ object AvisoTaskParser {
                     window.AvisoBridge.onError('Confirm click error: ' + e.toString());
                 }
             }
+        })();
+    """
+
+    /**
+     * Highlights the "Confirm view" (Подтвердить просмотр / Проверить) button belonging to the EXACT
+     * task row that was watched, scrolls it into center view, and draws an animated green glow around it.
+     * Stays ready for the user to click and complete without automatic clicking.
+     */
+    const val JS_HIGHLIGHT_CONFIRM_BUTTON = """
+        (function() {
+            try {
+                function isConfirmBtn(el) {
+                    if (!el) return false;
+                    var t = (el.innerText || el.textContent || el.value || '').trim().toLowerCase();
+                    var cls = (el.className || '').toString().toLowerCase();
+                    var oc = (el.getAttribute('onclick') || '').toLowerCase();
+                    var id = (el.id || '').toLowerCase();
+
+                    if (!t && !cls && !oc && !id) return false;
+                    if (t.indexOf('отмена') !== -1 || t.indexOf('cancel') !== -1 || t.indexOf('жалоб') !== -1) return false;
+
+                    if (t.indexOf('подтвердить просмотр') !== -1 ||
+                        t.indexOf('подтвердить') !== -1 ||
+                        t.indexOf('проверить просмотр') !== -1 ||
+                        t.indexOf('проверить выполнение') !== -1 ||
+                        t.indexOf('проверить') !== -1 ||
+                        t.indexOf('забрать награду') !== -1 ||
+                        t.indexOf('получить вознаграждение') !== -1 ||
+                        t.indexOf('получить деньги') !== -1 ||
+                        t.indexOf('получить') !== -1 ||
+                        t.indexOf('confirm view') !== -1 ||
+                        t.indexOf('confirm') !== -1 ||
+                        t.indexOf('verify') !== -1 ||
+                        t.indexOf('check') !== -1) {
+                        return true;
+                    }
+
+                    if (cls.indexOf('btn_confirm') !== -1 || cls.indexOf('btn_check') !== -1 ||
+                        cls.indexOf('confirm-btn') !== -1 || cls.indexOf('btn_success') !== -1 ||
+                        cls.indexOf('btn-success') !== -1 || cls.indexOf('btn_verify') !== -1 ||
+                        oc.indexOf('confirm') !== -1 || oc.indexOf('check') !== -1 ||
+                        id.indexOf('confirm') !== -1 || id.indexOf('btn_check') !== -1) {
+                        return true;
+                    }
+                    return false;
+                }
+
+                var targetRow = (window._avisoLastTaskRow && document.body.contains(window._avisoLastTaskRow)) ? window._avisoLastTaskRow : 
+                                (window._avisoLastTaskId ? document.getElementById(window._avisoLastTaskId) : null);
+                
+                var btn = null;
+                if (targetRow) {
+                    var candidates = targetRow.querySelectorAll('button, a, input, span, div, [role="button"]');
+                    for (var c = 0; c < candidates.length; c++) {
+                        if (isConfirmBtn(candidates[c])) {
+                            btn = candidates[c];
+                            break;
+                        }
+                    }
+                }
+
+                if (!btn) {
+                    var all = document.querySelectorAll('button, a, input, span, div, [role="button"]');
+                    for (var a = 0; a < all.length; a++) {
+                        if (isConfirmBtn(all[a]) && all[a].offsetParent !== null) {
+                            btn = all[a];
+                            break;
+                        }
+                    }
+                }
+
+                if (btn) {
+                    try { btn.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch(e) {}
+                    btn.style.outline = '4px solid #16a34a';
+                    btn.style.boxShadow = '0 0 24px rgba(22, 163, 74, 0.9)';
+                    btn.style.borderRadius = '8px';
+                    btn.style.transition = 'all 0.3s ease-in-out';
+                }
+            } catch(e) {}
         })();
     """
 

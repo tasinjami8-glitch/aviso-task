@@ -492,22 +492,22 @@ fun AvisoBrowserScreen(
             bringAppToFront(context)
             AvisoNotificationHelper.sendAutoWorkFinishedNotification(context)
 
-            // Step 1: Return to previous tab (Tab 1) and close Video Tab
+            // Step 1: Return to original Aviso tab (Tab 1) and close Video Tab
             viewModel.closeVideoTab()
             viewModel.selectTab(0)
 
-            // Step 2: Wait 1.5s for Tab 1 to gain focus and render "Подтвердить просмотр" / Russian confirm button
-            delay(1500L)
+            // Step 2: Wait for Tab 1 to regain focus and render "Подтвердить просмотр" / confirm button
+            delay(1200L)
 
-            // Step 3: Run confirm click on main WebView (Tab 1) where the link was clicked
+            // Step 3: Automatically click "Confirm view" / "Подтвердить просмотр" on the exact task row
             for (attempt in 1..8) {
                 webViewRef?.evaluateJavascript(AvisoTaskParser.JS_AUTO_WORK_CLICK_CONFIRM, null)
-                delay(600L)
+                delay(500L)
             }
 
-            Toast.makeText(context, "🎬 ভিডিও দেখা সম্পন্ন ও কনফার্ম করা হয়েছে ✓", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "🎬 ভিডিও দেখা সম্পন্ন ও ভিউ কনফার্ম করা হয়েছে ✓", Toast.LENGTH_SHORT).show()
 
-            // Step 4: Wait 1.8 seconds so reward is registered and automatically refresh the page
+            // Step 4: Wait 1.8s and automatically refresh the page
             delay(1800L)
             if (webViewRef?.url?.contains("tasks-youtube") == true) {
                 webViewRef?.reload()
@@ -658,11 +658,11 @@ fun AvisoBrowserScreen(
             viewModel.updateAutoWorkCountdown(0, totalDurationWithBuffer)
             viewModel.updateVideoTabCountdown(0, totalDurationWithBuffer)
 
-            // Step 3: Video finished! Bring app to front
+            // Step 3: Video viewing time completed! Bring app to front
             bringAppToFront(context)
             AvisoNotificationHelper.sendAutoWorkFinishedNotification(context)
 
-            // Return to previous tab (Tab 1) immediately and close Tab 2
+            // Return to original Aviso tab (Tab 1) and close Tab 2
             if (uiState.isVideoTabOpen) {
                 viewModel.setAutoWorkStatus("ভিডিও দেখা শেষ! আগের ট্যাবে ফিরে যাওয়া হচ্ছে...")
                 viewModel.closeVideoTab()
@@ -672,7 +672,7 @@ fun AvisoBrowserScreen(
                 delay(1000L)
             }
 
-            // Step 4: Now click Confirm on previous tab (Tab 1) where the task link was clicked
+            // Step 4: Automatically click "Confirm view" (Подтвердить просмотр / Проверить) on the exact task row
             viewModel.setAutoWorkStatus("আগের ট্যাবে টাস্ক নিশ্চিতকরণ (Confirm View) করা হচ্ছে...")
             var isConfirmed = false
             for (attempt in 1..8) {
@@ -1107,8 +1107,7 @@ fun AvisoBrowserScreen(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .zIndex(if (!isCurrentTabVideo) 2f else 1f)
-                    .alpha(if (!isCurrentTabVideo) 1f else 0.001f)
+                    .zIndex(if (!isCurrentTabVideo) 2f else 0f)
             ) {
                 AndroidView(
                     modifier = Modifier
@@ -1120,6 +1119,7 @@ fun AvisoBrowserScreen(
                                 ViewGroup.LayoutParams.MATCH_PARENT,
                                 ViewGroup.LayoutParams.MATCH_PARENT
                             )
+                            setBackgroundColor(android.graphics.Color.WHITE)
 
                             // Cookie Setup for Aviso Session & Login
                             val cookieManager = CookieManager.getInstance()
@@ -1466,6 +1466,7 @@ fun AvisoBrowserScreen(
                     },
                     update = { wv ->
                         webViewRef = wv
+                        wv.visibility = if (!isCurrentTabVideo) View.VISIBLE else View.INVISIBLE
                         canGoBack = wv.canGoBack()
                     }
                 )
@@ -1477,7 +1478,6 @@ fun AvisoBrowserScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .zIndex(if (isCurrentTabVideo) 2f else 0f)
-                        .alpha(if (isCurrentTabVideo) 1f else 0.001f)
                 ) {
                     Box(
                         modifier = Modifier
@@ -1496,6 +1496,7 @@ fun AvisoBrowserScreen(
                                         ViewGroup.LayoutParams.MATCH_PARENT,
                                         ViewGroup.LayoutParams.MATCH_PARENT
                                     )
+                                    setBackgroundColor(android.graphics.Color.BLACK)
                                     setLayerType(View.LAYER_TYPE_HARDWARE, null)
                                     val cookieManager = CookieManager.getInstance()
                                     cookieManager.setAcceptCookie(true)
@@ -1514,7 +1515,7 @@ fun AvisoBrowserScreen(
                                         javaScriptCanOpenWindowsAutomatically = true
                                         mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                                         cacheMode = WebSettings.LOAD_DEFAULT
-                                        userAgentString = "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.6613.127 Mobile Safari/537.36"
+                                        userAgentString = "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36"
                                     }
 
                                     addJavascriptInterface(
@@ -1614,8 +1615,14 @@ fun AvisoBrowserScreen(
                                             view?.evaluateJavascript(AvisoTaskParser.JS_START_AND_WATCH_VIDEO, null)
                                             view?.postDelayed({
                                                 view.evaluateJavascript(AvisoTaskParser.JS_START_AND_WATCH_VIDEO, null)
+                                            }, 400L)
+                                            view?.postDelayed({
+                                                view.evaluateJavascript(AvisoTaskParser.JS_START_AND_WATCH_VIDEO, null)
                                                 view.evaluateJavascript(AvisoTaskParser.JS_AUTO_WORK_CLICK_CONFIRM, null)
                                             }, 1200L)
+                                            view?.postDelayed({
+                                                view.evaluateJavascript(AvisoTaskParser.JS_START_AND_WATCH_VIDEO, null)
+                                            }, 2200L)
                                         }
 
                                         override fun onReceivedSslError(view: WebView?, handler: SslErrorHandler?, error: SslError?) {
@@ -1632,6 +1639,7 @@ fun AvisoBrowserScreen(
                             },
                             update = { wv ->
                                 secondaryWebViewRef = wv
+                                wv.visibility = if (isCurrentTabVideo) View.VISIBLE else View.INVISIBLE
                                 val curVideoUrl = uiState.videoTabUrl
                                 if (!curVideoUrl.isNullOrEmpty() && curVideoUrl != lastLoadedVideoUrl) {
                                     lastLoadedVideoUrl = curVideoUrl
