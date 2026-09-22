@@ -624,7 +624,7 @@ fun AvisoBrowserScreen(
                 }
             }
 
-            var taskDuration = (uiState.videoTabDuration.takeIf { it > 0 } ?: realInterstitialDurationSignal ?: autoWorkTaskStartedSignal ?: 15).coerceAtLeast(5)
+            var taskDuration = (autoWorkTaskStartedSignal?.takeIf { it > 0 } ?: realInterstitialDurationSignal?.takeIf { it > 0 } ?: uiState.videoTabDuration.takeIf { it > 0 } ?: 15).coerceAtLeast(5)
             var totalDurationWithBuffer = taskDuration + 1 // +1 second extra wait buffer as requested
             viewModel.setAutoWorkStatus("ভিডিও দেখা হচ্ছে ($totalDurationWithBuffer সেক)...")
 

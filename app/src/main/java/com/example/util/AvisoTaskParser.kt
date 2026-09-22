@@ -159,39 +159,118 @@ object AvisoTaskParser {
                     }
                 }
 
-                function extractDur(el) {
+                function parseExactDuration(el, rawText) {
                     try {
                         var row = el ? (el.closest ? (el.closest('tr') || el.closest('.work-serf') || el.closest('.task-item') || el.closest('[id^="adv_"]') || el.closest('[id^="task_"]') || el.closest('[id^="bl_"]') || el.closest('div')) : null) : null;
+                        
+                        function parseFromStr(str) {
+                            if (!str) return 0;
+                            var s = str.toString().trim();
+                            if (!s) return 0;
+
+                            // 1. Min + Sec (e.g. "1 мин 30 сек", "1 min 20 sec", "1m 30s")
+                            var mMS = s.match(/(\d+)\s*(?:мин|минут|min|minute|m)[\s.,]+(\d+)\s*(?:сек|секунд|sec|second|s|с|c|cek)/i);
+                            if (mMS) {
+                                var mn = parseInt(mMS[1], 10) || 0;
+                                var sc = parseInt(mMS[2], 10) || 0;
+                                var total = mn * 60 + sc;
+                                if (total >= 3 && total <= 1800) return total;
+                            }
+
+                            // 2. Clock format "01:30", "00:20", "0:05", "00:05"
+                            var mClock = s.match(/\b(\d{1,2}):(\d{2})\b/);
+                            if (mClock) {
+                                var cMin = parseInt(mClock[1], 10) || 0;
+                                var cSec = parseInt(mClock[2], 10) || 0;
+                                var cTotal = cMin * 60 + cSec;
+                                if (cTotal >= 3 && cTotal <= 1800) return cTotal;
+                            }
+
+                            // 3. Seconds with various suffixes: "5 сек", "10 сек.", "20 секунд", "15с", "5 с", "10 sec", "20 secs", "5s", "10s", "20s", "5 cek", "10 cek", "20 cek"
+                            var mS = s.match(/(\d+)\s*(?:сек|секунд|секунды|секунда|sec|secs|second|seconds|cek|с|s|c)(?:[^\w\dа-яА-ЯёЁ]|$)/i);
+                            if (mS) {
+                                var valS = parseInt(mS[1], 10) || 0;
+                                if (valS >= 3 && valS <= 1800) return valS;
+                            }
+
+                            // 4. Minutes: "1 мин", "2 минуты", "1 min", "2 mins"
+                            var mM = s.match(/(\d+)\s*(?:мин|минут|минуты|минута|min|mins|minute|minutes)(?:[^\w\dа-яА-ЯёЁ]|$)/i);
+                            if (mM) {
+                                var valM = parseInt(mM[1], 10) || 0;
+                                if (valM >= 1 && valM <= 60) return valM * 60;
+                            }
+
+                            // 5. Standalone number inside a dedicated time cell/badge (e.g. "5", "10", "15", "20", "30", "60", "90", "120")
+                            var mPure = s.match(/^\s*(\d{1,3})\s*$/);
+                            if (mPure) {
+                                var pureNum = parseInt(mPure[1], 10) || 0;
+                                if (pureNum >= 3 && pureNum <= 600) return pureNum;
+                            }
+
+                            return 0;
+                        }
+
+                        var candidates = [];
+                        if (el) candidates.push(el);
                         if (row) {
-                            // 1. Check rightmost columns / cells / badges where time is displayed
-                            var rightCols = row.querySelectorAll('td:last-child, td:nth-last-child(2), td:nth-child(3), td:nth-child(4), span.badge, span.time, .task-time, .work-time, [class*="time"], [class*="sec"], [class*="count"]');
-                            for (var c = 0; c < rightCols.length; c++) {
-                                var cTxt = (rightCols[c].innerText || rightCols[c].textContent || '').trim();
-                                var cMatch = cTxt.match(/(\d+)\s*(?:сек|sec|секунд|с\b|s\b)/i);
-                                if (cMatch) {
-                                    var num = parseInt(cMatch[1], 10);
-                                    if (num > 0 && num <= 600) return num;
+                            var allElements = row.querySelectorAll('td, th, span, div, b, font, [class*="time"], [class*="sec"], [class*="timer"], [class*="badge"], [data-sec], [data-time], [data-timer]');
+                            for (var i = allElements.length - 1; i >= 0; i--) {
+                                candidates.push(allElements[i]);
+                            }
+                            candidates.push(row);
+                        }
+
+                        for (var c = 0; c < candidates.length; c++) {
+                            var cand = candidates[c];
+                            if (!cand) continue;
+
+                            var dSec = cand.getAttribute ? (cand.getAttribute('data-sec') || cand.getAttribute('data-time') || cand.getAttribute('data-timer') || cand.getAttribute('data-duration') || cand.getAttribute('data-seconds')) : null;
+                            if (dSec) {
+                                var n1 = parseInt(dSec, 10);
+                                if (n1 >= 3 && n1 <= 1800) return n1;
+                            }
+
+                            var tAttr = cand.getAttribute ? cand.getAttribute('title') : null;
+                            if (tAttr) {
+                                var n2 = parseFromStr(tAttr);
+                                if (n2 > 0) return n2;
+                            }
+
+                            var ocAttr = cand.getAttribute ? cand.getAttribute('onclick') : null;
+                            if (ocAttr) {
+                                var mOc = ocAttr.match(/(?:start|youtube|watch|session|vl|view|func)[^(]*\(\s*[^,)]*,\s*(\d+)/i) ||
+                                          ocAttr.match(/(?:start|youtube|watch|session|vl|view|func)[^(]*\(\s*(\d+)\s*\)/i);
+                                if (mOc) {
+                                    var n3 = parseInt(mOc[1], 10);
+                                    if (n3 >= 3 && n3 <= 1800) return n3;
                                 }
                             }
 
-                            // 2. Check full row text
-                            var txt = (row.innerText || row.textContent || '');
-                            var mS = txt.match(/(\d+)\s*(?:сек|sec|секунд|с\b|s\b)/i);
-                            if (mS) {
-                                var sNum = parseInt(mS[1], 10);
-                                if (sNum > 0 && sNum <= 600) return sNum;
-                            }
-                            var mM = txt.match(/(\d+)\s*(?:min|минут|m\b)/i);
-                            if (mM) {
-                                var mNum = parseInt(mM[1], 10);
-                                if (mNum > 0 && mNum <= 30) return mNum * 60;
+                            var txt = (cand.innerText || cand.textContent || '').trim();
+                            if (txt) {
+                                var n4 = parseFromStr(txt);
+                                if (n4 > 0) return n4;
                             }
                         }
+
+                        if (rawText) {
+                            var nRaw = parseFromStr(rawText);
+                            if (nRaw > 0) return nRaw;
+                        }
+                        if (row) {
+                            var nRow = parseFromStr(row.innerText || row.textContent || '');
+                            if (nRow > 0) return nRow;
+                        }
                     } catch(e) {}
-                    return window._avisoLastExtractedSec || 20;
+                    return 0;
                 }
 
-                // Global click listener to always capture the exact task row, click coordinates, and duration
+                function extractDur(el) {
+                    var d = parseExactDuration(el);
+                    return (d && d > 0) ? d : (window._avisoLastExtractedSec || 15);
+                }
+
+                // Global click listener to always capture the exact task row, click coordinates, cell, and duration
                 document.addEventListener('click', function(e) {
                     try {
                         var el = e.target;
@@ -201,13 +280,15 @@ object AvisoTaskParser {
                             window._avisoLastTaskRow = row;
                             window._avisoLastTaskId = row.id || row.getAttribute('id') || row.getAttribute('data-task-id') || row.getAttribute('data-id') || '';
                             window._avisoLastTaskLink = el;
+                            window._avisoLastTaskCell = el.closest ? (el.closest('td') || el.closest('th') || el.parentElement) : el.parentElement;
+                            window._avisoLastTaskCellIndex = (window._avisoLastTaskCell && typeof window._avisoLastTaskCell.cellIndex === 'number') ? window._avisoLastTaskCell.cellIndex : -1;
 
                             try {
                                 var rect = el.getBoundingClientRect();
                                 window._avisoLastClickCoords = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
                             } catch(err) {}
 
-                            var parsedSec = extractDur(el);
+                            var parsedSec = parseExactDuration(el, row.innerText);
                             if (parsedSec && parsedSec > 0) {
                                 window._avisoLastExtractedSec = parsedSec;
                             }
@@ -218,7 +299,8 @@ object AvisoTaskParser {
                 function handleOpenUrl(url, duration) {
                     if (!url || url === 'about:blank' || url.indexOf('javascript:') === 0) return;
                     var fullUrl = resolveFullUrl(url);
-                    var dur = duration || window._avisoLastExtractedSec || 20;
+                    var dur = (duration && duration > 0) ? duration : (window._avisoLastExtractedSec || 15);
+                    window._avisoLastExtractedSec = null;
                     if (window.AvisoBridge && window.AvisoBridge.openNewTab) {
                         window.AvisoBridge.openNewTab(fullUrl, dur);
                     } else {
@@ -229,7 +311,7 @@ object AvisoTaskParser {
                 // Override window.open to delegate to Tab system with dynamic task duration
                 window.open = function(url, target, features) {
                     if (url && url !== 'about:blank') {
-                        var dynamicDur = window._avisoLastExtractedSec || 20;
+                        var dynamicDur = window._avisoLastExtractedSec || 15;
                         handleOpenUrl(url, dynamicDur);
                     }
                     return {
@@ -238,16 +320,16 @@ object AvisoTaskParser {
                         focus: function() {},
                         location: {
                             set href(val) { 
-                                var dDur = window._avisoLastExtractedSec || 20;
+                                var dDur = window._avisoLastExtractedSec || 15;
                                 handleOpenUrl(val, dDur); 
                             },
                             get href() { return window.location.href; },
                             replace: function(val) { 
-                                var dDur = window._avisoLastExtractedSec || 20;
+                                var dDur = window._avisoLastExtractedSec || 15;
                                 handleOpenUrl(val, dDur); 
                             },
                             assign: function(val) { 
-                                var dDur = window._avisoLastExtractedSec || 20;
+                                var dDur = window._avisoLastExtractedSec || 15;
                                 handleOpenUrl(val, dDur); 
                             }
                         },
@@ -273,34 +355,120 @@ object AvisoTaskParser {
                 window._avisoVideoPlayTriggered = false;
                 window._avisoVideoPositionReported = false;
 
-                function extractDur(el) {
+                function parseExactDuration(el, rawText) {
                     try {
                         var row = el ? (el.closest ? (el.closest('tr') || el.closest('.work-serf') || el.closest('.task-item') || el.closest('[id^="adv_"]') || el.closest('[id^="task_"]') || el.closest('[id^="bl_"]') || el.closest('div')) : null) : null;
+                        
+                        function parseFromStr(str) {
+                            if (!str) return 0;
+                            var s = str.toString().trim();
+                            if (!s) return 0;
+
+                            // 1. Min + Sec (e.g. "1 мин 30 сек", "1 min 20 sec", "1m 30s")
+                            var mMS = s.match(/(\d+)\s*(?:мин|минут|min|minute|m)[\s.,]+(\d+)\s*(?:сек|секунд|sec|second|s|с|c|cek)/i);
+                            if (mMS) {
+                                var mn = parseInt(mMS[1], 10) || 0;
+                                var sc = parseInt(mMS[2], 10) || 0;
+                                var total = mn * 60 + sc;
+                                if (total >= 3 && total <= 1800) return total;
+                            }
+
+                            // 2. Clock format "01:30", "00:20", "0:05", "00:05"
+                            var mClock = s.match(/\b(\d{1,2}):(\d{2})\b/);
+                            if (mClock) {
+                                var cMin = parseInt(mClock[1], 10) || 0;
+                                var cSec = parseInt(mClock[2], 10) || 0;
+                                var cTotal = cMin * 60 + cSec;
+                                if (cTotal >= 3 && cTotal <= 1800) return cTotal;
+                            }
+
+                            // 3. Seconds with various suffixes: "5 сек", "10 сек.", "20 секунд", "15с", "5 с", "10 sec", "20 secs", "5s", "10s", "20s", "5 cek", "10 cek", "20 cek"
+                            var mS = s.match(/(\d+)\s*(?:сек|секунд|секунды|секунда|sec|secs|second|seconds|cek|с|s|c)(?:[^\w\dа-яА-ЯёЁ]|$)/i);
+                            if (mS) {
+                                var valS = parseInt(mS[1], 10) || 0;
+                                if (valS >= 3 && valS <= 1800) return valS;
+                            }
+
+                            // 4. Minutes: "1 мин", "2 минуты", "1 min", "2 mins"
+                            var mM = s.match(/(\d+)\s*(?:мин|минут|минуты|минута|min|mins|minute|minutes)(?:[^\w\dа-яА-ЯёЁ]|$)/i);
+                            if (mM) {
+                                var valM = parseInt(mM[1], 10) || 0;
+                                if (valM >= 1 && valM <= 60) return valM * 60;
+                            }
+
+                            // 5. Standalone number inside a dedicated time cell/badge (e.g. "5", "10", "15", "20", "30", "60", "90", "120")
+                            var mPure = s.match(/^\s*(\d{1,3})\s*$/);
+                            if (mPure) {
+                                var pureNum = parseInt(mPure[1], 10) || 0;
+                                if (pureNum >= 3 && pureNum <= 600) return pureNum;
+                            }
+
+                            return 0;
+                        }
+
+                        var candidates = [];
+                        if (el) candidates.push(el);
                         if (row) {
-                            // Look at right-side columns, badges, or spans first
-                            var rightCols = row.querySelectorAll('td:last-child, td:nth-last-child(2), td:nth-child(3), td:nth-child(4), span.badge, span.time, .task-time, .work-time, [class*="time"], [class*="sec"], [class*="count"]');
-                            for (var rc = 0; rc < rightCols.length; rc++) {
-                                var rcTxt = (rightCols[rc].innerText || rightCols[rc].textContent || '').trim();
-                                var rmS = rcTxt.match(/(\d+)\s*(?:сек|sec|секунд|с\b|s\b)/i);
-                                if (rmS) {
-                                    var n = parseInt(rmS[1], 10);
-                                    if (n > 0 && n <= 600) return n;
+                            var allElements = row.querySelectorAll('td, th, span, div, b, font, [class*="time"], [class*="sec"], [class*="timer"], [class*="badge"], [data-sec], [data-time], [data-timer]');
+                            for (var i = allElements.length - 1; i >= 0; i--) {
+                                candidates.push(allElements[i]);
+                            }
+                            candidates.push(row);
+                        }
+
+                        for (var c = 0; c < candidates.length; c++) {
+                            var cand = candidates[c];
+                            if (!cand) continue;
+
+                            var dSec = cand.getAttribute ? (cand.getAttribute('data-sec') || cand.getAttribute('data-time') || cand.getAttribute('data-timer') || cand.getAttribute('data-duration') || cand.getAttribute('data-seconds')) : null;
+                            if (dSec) {
+                                var n1 = parseInt(dSec, 10);
+                                if (n1 >= 3 && n1 <= 1800) return n1;
+                            }
+
+                            var tAttr = cand.getAttribute ? cand.getAttribute('title') : null;
+                            if (tAttr) {
+                                var n2 = parseFromStr(tAttr);
+                                if (n2 > 0) return n2;
+                            }
+
+                            var ocAttr = cand.getAttribute ? cand.getAttribute('onclick') : null;
+                            if (ocAttr) {
+                                var mOc = ocAttr.match(/(?:start|youtube|watch|session|vl|view|func)[^(]*\(\s*[^,)]*,\s*(\d+)/i) ||
+                                          ocAttr.match(/(?:start|youtube|watch|session|vl|view|func)[^(]*\(\s*(\d+)\s*\)/i);
+                                if (mOc) {
+                                    var n3 = parseInt(mOc[1], 10);
+                                    if (n3 >= 3 && n3 <= 1800) return n3;
                                 }
                             }
-                            var txt = (row ? (row.innerText || row.textContent) : '') || '';
-                            var mS = txt.match(/(\d+)\s*(?:сек|sec|секунд|с\b|s\b)/i);
-                            if (mS) {
-                                var sn = parseInt(mS[1], 10);
-                                if (sn > 0 && sn <= 600) return sn;
-                            }
-                            var mM = txt.match(/(\d+)\s*(?:min|минут|m\b)/i);
-                            if (mM) {
-                                var mn = parseInt(mM[1], 10);
-                                if (mn > 0 && mn <= 30) return mn * 60;
+
+                            var txt = (cand.innerText || cand.textContent || '').trim();
+                            if (txt) {
+                                var n4 = parseFromStr(txt);
+                                if (n4 > 0) return n4;
                             }
                         }
+
+                        if (rawText) {
+                            var nRaw = parseFromStr(rawText);
+                            if (nRaw > 0) return nRaw;
+                        }
+                        if (row) {
+                            var nRow = parseFromStr(row.innerText || row.textContent || '');
+                            if (nRow > 0) return nRow;
+                        }
                     } catch(e) {}
-                    return window._avisoLastExtractedSec || 20;
+                    return 0;
+                }
+
+                function extractDur(el) {
+                    var d = parseExactDuration(el);
+                    return (d && d > 0) ? d : (window._avisoLastExtractedSec || 15);
+                }
+
+                function extractDurationFromRow(rowEl, text) {
+                    var d = parseExactDuration(rowEl, text);
+                    return (d && d > 0) ? d : 15;
                 }
 
                 // Clean, reliable click helper
@@ -314,12 +482,14 @@ object AvisoTaskParser {
                         window._avisoLastExtractedSec = dur;
                     }
 
-                    // Track clicked task element, row, and exact coordinates
+                    // Track clicked task element, row, cell, and exact coordinates
                     var parentRow = el.closest ? (el.closest('tr') || el.closest('.work-serf') || el.closest('.task-item') || el.closest('[id^="adv_"]') || el.closest('[id^="task_"]')) : null;
                     if (parentRow) {
                         window._avisoLastTaskRow = parentRow;
                         window._avisoLastTaskId = parentRow.id || parentRow.getAttribute('id') || parentRow.getAttribute('data-task-id') || parentRow.getAttribute('data-id') || '';
                         window._avisoLastTaskLink = el;
+                        window._avisoLastTaskCell = el.closest ? (el.closest('td') || el.closest('th') || el.parentElement) : el.parentElement;
+                        window._avisoLastTaskCellIndex = (window._avisoLastTaskCell && typeof window._avisoLastTaskCell.cellIndex === 'number') ? window._avisoLastTaskCell.cellIndex : -1;
                     }
 
                     try {
@@ -392,28 +562,6 @@ object AvisoTaskParser {
                     }
 
                     return false;
-                }
-
-                function extractDurationFromRow(rowEl, text) {
-                    if (rowEl) {
-                        // Check right-side cells and badges first
-                        var rightCells = rowEl.querySelectorAll('td:last-child, td:nth-last-child(1), td:nth-last-child(2), .badge, .time, .sec, span[class*="sec"], span[class*="time"], div[class*="time"]');
-                        for (var rc = 0; rc < rightCells.length; rc++) {
-                            var rct = (rightCells[rc].innerText || rightCells[rc].textContent || '').trim();
-                            var mS0 = rct.match(/(\d+)\s*(?:сек|sec|секунд|с\b|s\b)/i);
-                            if (mS0) return parseInt(mS0[1], 10);
-                            var mNum = rct.match(/^(\d+)$/);
-                            if (mNum) return parseInt(mNum[1], 10);
-                        }
-                    }
-                    var t = text || '';
-                    var mMS = t.match(/(\d+)\s*(?:minute|min|минут)[s]?\s*(?:and\s*)?(\d+)\s*(?:second|sec|секунд)[s]?/i);
-                    if (mMS) return (parseInt(mMS[1], 10) || 0) * 60 + (parseInt(mMS[2], 10) || 0);
-                    var mM = t.match(/(\d+)\s*(?:minute|min|минут)[s]?/i);
-                    if (mM) return (parseInt(mM[1], 10) || 0) * 60;
-                    var mS = t.match(/(\d+)\s*(?:сек|sec|секунд|с\b|s\b)/i);
-                    if (mS) return parseInt(mS[1], 10);
-                    return window._avisoLastExtractedSec || 20;
                 }
 
                 // 2. Check if a genuine visible captcha block exists
@@ -1095,55 +1243,67 @@ object AvisoTaskParser {
                 }
 
                 var clicked = false;
-                var docs = getAllDocs();
 
-                // 1. First check inside the saved active task row / container where the link was clicked!
+                // 1. Locate the EXACT task row where the link was clicked
                 var targetRow = (window._avisoLastTaskRow && document.body.contains(window._avisoLastTaskRow)) ? window._avisoLastTaskRow : 
                                 (window._avisoLastTaskId ? document.getElementById(window._avisoLastTaskId) : null);
                 
-                if (targetRow) {
-                    try { targetRow.scrollIntoView({ behavior: 'instant', block: 'center' }); } catch(e) {}
-                    var rowCandidates = targetRow.querySelectorAll('button, a, input, span, div, p, strong, b, [role="button"]');
-                    for (var r = 0; r < rowCandidates.length; r++) {
-                        if (isConfirmBtn(rowCandidates[r])) {
-                            safeClick(rowCandidates[r]);
+                // 2. Locate the EXACT cell / container where the link was located
+                var targetCell = (window._avisoLastTaskCell && document.body.contains(window._avisoLastTaskCell)) ? window._avisoLastTaskCell : null;
+                if (!targetCell && targetRow) {
+                    if (window._avisoLastTaskCellIndex !== undefined && window._avisoLastTaskCellIndex >= 0 && targetRow.cells && targetRow.cells[window._avisoLastTaskCellIndex]) {
+                        targetCell = targetRow.cells[window._avisoLastTaskCellIndex];
+                    } else {
+                        targetCell = targetRow.querySelector('td:first-child, td:nth-child(2), td, div');
+                    }
+                }
+
+                if (targetCell) {
+                    try { targetCell.scrollIntoView({ behavior: 'instant', block: 'center' }); } catch(e) {}
+                    
+                    // (A) Check inside this EXACT cell for confirm button or any active button/link
+                    var cellCandidates = targetCell.querySelectorAll('button, a, input, [role="button"], span[onclick], div[onclick], span, div, strong, b');
+                    
+                    // Priority 1: Named confirm/check button inside this exact cell
+                    for (var c1 = 0; c1 < cellCandidates.length; c1++) {
+                        if (isConfirmBtn(cellCandidates[c1])) {
+                            safeClick(cellCandidates[c1]);
                             clicked = true;
                             break;
                         }
                     }
-                    // If no explicit confirm button matched by keyword, check if any newly appeared button/action replaced the link in this row
+
+                    // Priority 2: Even if confirm view text is not there, click whatever button/link/element is at this EXACT link spot
                     if (!clicked) {
-                        for (var r2 = 0; r2 < rowCandidates.length; r2++) {
-                            var rEl = rowCandidates[r2];
-                            var rTxt = (rEl.innerText || rEl.value || '').trim().toLowerCase();
-                            var rCls = (rEl.className || '').toString().toLowerCase();
-                            if (rCls.indexOf('btn') !== -1 || rTxt.indexOf('просмотр') !== -1 || rTxt.indexOf('подтверд') !== -1 || rTxt.indexOf('провер') !== -1) {
-                                safeClick(rEl);
+                        for (var c2 = 0; c2 < cellCandidates.length; c2++) {
+                            var el2 = cellCandidates[c2];
+                            var tag = el2.tagName.toUpperCase();
+                            var cls = (el2.className || '').toString().toLowerCase();
+                            var oc = (el2.getAttribute('onclick') || '').toLowerCase();
+                            if (tag === 'BUTTON' || tag === 'A' || tag === 'INPUT' || el2.getAttribute('role') === 'button' || cls.indexOf('btn') !== -1 || oc.length > 0 || el2.getAttribute('href')) {
+                                safeClick(el2);
                                 clicked = true;
                                 break;
                             }
                         }
                     }
-                }
 
-                // Check parent element or exact coordinate of the original clicked link
-                if (!clicked && window._avisoLastTaskLink && window._avisoLastTaskLink.parentElement && document.body.contains(window._avisoLastTaskLink.parentElement)) {
-                    var parentCandidates = window._avisoLastTaskLink.parentElement.querySelectorAll('button, a, input, span, div, [role="button"]');
-                    for (var p = 0; p < parentCandidates.length; p++) {
-                        if (isConfirmBtn(parentCandidates[p])) {
-                            safeClick(parentCandidates[p]);
-                            clicked = true;
-                            break;
-                        }
+                    // Priority 3: If no button element, click the first clickable child or targetCell itself
+                    if (!clicked && cellCandidates.length > 0) {
+                        safeClick(cellCandidates[0]);
+                        clicked = true;
+                    } else if (!clicked) {
+                        safeClick(targetCell);
+                        clicked = true;
                     }
                 }
 
-                // Check element at exact previous click coordinates
+                // 3. Check element at exact previous click coordinates on screen
                 if (!clicked && window._avisoLastClickCoords && typeof document.elementFromPoint === 'function') {
                     try {
                         var elAtPoint = document.elementFromPoint(window._avisoLastClickCoords.x, window._avisoLastClickCoords.y);
                         if (elAtPoint && elAtPoint !== document.body && elAtPoint !== document.documentElement) {
-                            var clickableAtPoint = (elAtPoint.tagName === 'A' || elAtPoint.tagName === 'BUTTON' || elAtPoint.getAttribute('role') === 'button' || (elAtPoint.className || '').indexOf('btn') !== -1) ? elAtPoint : (elAtPoint.closest ? elAtPoint.closest('a, button, [role="button"], [class*="btn"]') : null);
+                            var clickableAtPoint = (elAtPoint.tagName === 'A' || elAtPoint.tagName === 'BUTTON' || elAtPoint.getAttribute('role') === 'button' || (elAtPoint.className || '').indexOf('btn') !== -1) ? elAtPoint : (elAtPoint.closest ? elAtPoint.closest('a, button, [role="button"], [class*="btn"], td, div') : elAtPoint);
                             if (clickableAtPoint) {
                                 safeClick(clickableAtPoint);
                                 clicked = true;
@@ -1152,20 +1312,33 @@ object AvisoTaskParser {
                     } catch(e) {}
                 }
 
-                // 2. Global search across all documents, frames, and sub-elements
-                if (!clicked) {
-                    for (var d = 0; d < docs.length; d++) {
-                        var allCandidates = docs[d].querySelectorAll('#btn_check, .btn_confirm, .btn-success, .btn_success, [id*="confirm"], [id*="check"], button, a, input, span, div, p, strong, b, [role="button"]');
-                        for (var i = 0; i < allCandidates.length; i++) {
-                            var el = allCandidates[i];
-                            if (isConfirmBtn(el)) {
-                                safeClick(el);
+                // 4. Search ONLY inside this specific targetRow (never anywhere else on the page)
+                if (!clicked && targetRow) {
+                    var rowCandidates = targetRow.querySelectorAll('button, a, input, [role="button"], span[onclick], div[onclick], span, div');
+                    for (var r = 0; r < rowCandidates.length; r++) {
+                        if (isConfirmBtn(rowCandidates[r])) {
+                            safeClick(rowCandidates[r]);
+                            clicked = true;
+                            break;
+                        }
+                    }
+                    if (!clicked && rowCandidates.length > 0) {
+                        for (var r2 = 0; r2 < rowCandidates.length; r2++) {
+                            var rEl = rowCandidates[r2];
+                            var rTag = rEl.tagName.toUpperCase();
+                            if (rTag === 'BUTTON' || rTag === 'A' || rTag === 'INPUT' || (rEl.className || '').indexOf('btn') !== -1) {
+                                safeClick(rEl);
                                 clicked = true;
                                 break;
                             }
                         }
-                        if (clicked) break;
                     }
+                }
+
+                // 5. If the original link element is still in the document, click it
+                if (!clicked && window._avisoLastTaskLink && document.body.contains(window._avisoLastTaskLink)) {
+                    safeClick(window._avisoLastTaskLink);
+                    clicked = true;
                 }
 
                 if (clicked && window._avisoLastTaskRow) {
