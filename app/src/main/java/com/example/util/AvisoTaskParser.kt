@@ -664,6 +664,84 @@ object AvisoTaskParser {
                     return false;
                 }
 
+                // 1. CHECK FOR PENDING CONFIRM VIEW BUTTONS FIRST (HIGHEST PRIORITY)
+                function isConfirmBtnGlobal(el) {
+                    if (!el) return false;
+                    var t = (el.innerText || el.textContent || el.value || '').trim().toLowerCase();
+                    var cls = (el.className || '').toString().toLowerCase();
+                    var oc = (el.getAttribute('onclick') || '').toLowerCase();
+                    var id = (el.id || '').toLowerCase();
+
+                    if (!t && !cls && !oc && !id) return false;
+                    if (t.indexOf('отмена') !== -1 || t.indexOf('cancel') !== -1 || t.indexOf('жалоб') !== -1 || t.indexOf('delete') !== -1 || t.indexOf('правила') !== -1) {
+                        return false;
+                    }
+
+                    if (t.indexOf('подтвердить просмотр') !== -1 ||
+                        t.indexOf('подтвердить') !== -1 ||
+                        t.indexOf('подтверждаю') !== -1 ||
+                        t.indexOf('проверить просмотр') !== -1 ||
+                        t.indexOf('проверить выполнение') !== -1 ||
+                        t.indexOf('проверить задание') !== -1 ||
+                        t.indexOf('проверить') !== -1 ||
+                        t.indexOf('забрать награду') !== -1 ||
+                        t.indexOf('забрать деньги') !== -1 ||
+                        t.indexOf('получить вознаграждение') !== -1 ||
+                        t.indexOf('получить деньги') !== -1 ||
+                        t.indexOf('получить') !== -1 ||
+                        t.indexOf('клик для подтверждения') !== -1 ||
+                        t.indexOf('нажмите для подтверждения') !== -1 ||
+                        t.indexOf('засчитать просмотр') !== -1 ||
+                        t.indexOf('confirm view') !== -1 ||
+                        t.indexOf('confirm') !== -1 ||
+                        t.indexOf('verify') !== -1 ||
+                        t.indexOf('check view') !== -1 ||
+                        t.indexOf('check task') !== -1 ||
+                        t.indexOf('check') !== -1 ||
+                        t.indexOf('claim') !== -1 ||
+                        t.indexOf('ниশ্চিত করুন') !== -1) {
+                        return true;
+                    }
+
+                    if (cls.indexOf('btn_confirm') !== -1 || cls.indexOf('btn_check') !== -1 ||
+                        cls.indexOf('confirm-btn') !== -1 || cls.indexOf('btn_success') !== -1 ||
+                        cls.indexOf('btn-success') !== -1 || cls.indexOf('btn_verify') !== -1 ||
+                        cls.indexOf('btn-verify') !== -1 || cls.indexOf('btn_youtube') !== -1 ||
+                        oc.indexOf('confirm') !== -1 || oc.indexOf('check_task') !== -1 ||
+                        oc.indexOf('check_adv') !== -1 || oc.indexOf('func_confirm') !== -1 ||
+                        oc.indexOf('func_check') !== -1 || id.indexOf('confirm') !== -1 ||
+                        id.indexOf('btn_check') !== -1) {
+                        return true;
+                    }
+                    return false;
+                }
+
+                var allPageBtns = document.querySelectorAll('button, a, input[type="button"], span[onclick], div[onclick], span, div, [role="button"]');
+                var foundPendingConfirm = null;
+                for (var pcb = 0; pcb < allPageBtns.length; pcb++) {
+                    var candConfirm = allPageBtns[pcb];
+                    if (isConfirmBtnGlobal(candConfirm) && (candConfirm.offsetParent !== null || candConfirm.offsetWidth > 0)) {
+                        foundPendingConfirm = candConfirm;
+                        break;
+                    }
+                }
+                if (foundPendingConfirm) {
+                    try {
+                        foundPendingConfirm.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        foundPendingConfirm.style.outline = '4px solid #22c55e';
+                        foundPendingConfirm.style.boxShadow = '0 0 25px rgba(34, 197, 94, 0.9)';
+                        foundPendingConfirm.style.backgroundColor = 'rgba(34, 197, 94, 0.2)';
+                    } catch(e) {}
+                    safeClick(foundPendingConfirm);
+                    if (window.AvisoBridge && window.AvisoBridge.onAutoWorkConfirmClicked) {
+                        window.AvisoBridge.onAutoWorkConfirmClicked(true);
+                    }
+                    if (window.AvisoBridge && window.AvisoBridge.onAutomationLog) {
+                        window.AvisoBridge.onAutomationLog('[Confirm] Clicked pending Confirm View (Подтвердить просмотр) button.');
+                    }
+                    return;
+                }
+
                 // 2. Check if a genuine visible captcha block exists
                 var realCaptcha = document.querySelector('iframe[src*="recaptcha/api2/bframe"], iframe[src*="challenges.cloudflare"], #captcha_block, .modal-captcha');
                 if (realCaptcha && realCaptcha.offsetParent !== null && realCaptcha.offsetWidth > 30) {
@@ -1439,6 +1517,24 @@ object AvisoTaskParser {
                 if (!clicked && window._avisoLastTaskLink && document.body.contains(window._avisoLastTaskLink)) {
                     safeClick(window._avisoLastTaskLink);
                     clicked = true;
+                }
+
+                // 6. GLOBAL FALLBACK: If still not clicked, search all documents and iframes for ANY visible confirm button
+                if (!clicked) {
+                    var allDocs = getAllDocs();
+                    for (var dIdx = 0; dIdx < allDocs.length; dIdx++) {
+                        var cDoc = allDocs[dIdx];
+                        var allDocBtns = cDoc.querySelectorAll('button, a, input[type="button"], span[onclick], div[onclick], span, div, [role="button"]');
+                        for (var ad = 0; ad < allDocBtns.length; ad++) {
+                            var gEl = allDocBtns[ad];
+                            if (isConfirmBtn(gEl) && (gEl.offsetParent !== null || gEl.offsetWidth > 0)) {
+                                safeClick(gEl);
+                                clicked = true;
+                                break;
+                            }
+                        }
+                        if (clicked) break;
+                    }
                 }
 
                 if (clicked && window._avisoLastTaskRow) {
