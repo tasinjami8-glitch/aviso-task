@@ -169,26 +169,16 @@ object AvisoTaskParser {
                     if (!url || url === 'about:blank' || url.indexOf('javascript:') === 0) return;
                     var fullUrl = resolveFullUrl(url);
                     var dur = duration || 20;
-                    var isYT = (fullUrl.indexOf('youtube.com') !== -1 || fullUrl.indexOf('youtu.be') !== -1);
-                    var isSession = (fullUrl.indexOf('/vl/') !== -1 || fullUrl.indexOf('/go/') !== -1 || fullUrl.indexOf('create_session') !== -1 || fullUrl.indexOf('youtube.php') !== -1);
-                    
-                    if (isYT || isSession) {
-                        if (window.AvisoBridge && window.AvisoBridge.openNewTab) {
-                            window.AvisoBridge.openNewTab(fullUrl, dur);
-                            return;
-                        }
+                    if (window.AvisoBridge && window.AvisoBridge.openNewTab) {
+                        window.AvisoBridge.openNewTab(fullUrl, dur);
                     } else {
-                        if (window.AvisoBridge && window.AvisoBridge.openNewTab) {
-                            window.AvisoBridge.openNewTab(fullUrl, 0);
-                            return;
-                        }
+                        window.location.href = fullUrl;
                     }
-                    window.location.href = fullUrl;
                 }
 
-                // Override window.open to delegate to separate Tab system
+                // Override window.open to delegate to Tab system
                 window.open = function(url, target, features) {
-                    if (url) {
+                    if (url && url !== 'about:blank') {
                         handleOpenUrl(url, 20);
                     }
                     return {
@@ -207,45 +197,6 @@ object AvisoTaskParser {
                         }
                     };
                 };
-
-                // Capture clicks on document: if a link opens in new tab/window or YouTube/session or Start Watching button, route to Tab system
-                document.addEventListener('click', function(e) {
-                    var el = e.target;
-                    if (!el) return;
-
-                    var a = (el.tagName === 'A') ? el : (el.closest ? el.closest('a') : null);
-                    if (a) {
-                        var rawHref = (a.getAttribute('href') || a.href || '').toString();
-                        var fullHref = resolveFullUrl(rawHref);
-                        var target = (a.getAttribute('target') || '').toLowerCase();
-                        var isYT = (fullHref.indexOf('youtube.com') !== -1 || fullHref.indexOf('youtu.be') !== -1);
-                        var isSession = (fullHref.indexOf('/vl/') !== -1 || fullHref.indexOf('/go/') !== -1 || fullHref.indexOf('create_session') !== -1 || fullHref.indexOf('youtube.php') !== -1);
-                        
-                        if (isYT || isSession || target === '_blank') {
-                            e.preventDefault();
-                            var d = extractDur(a);
-                            handleOpenUrl(fullHref, d);
-                            return;
-                        }
-                    }
-
-                    // Check if clicked element is "Приступить к просмотру" / Start Watching button
-                    var t = (el.innerText || el.value || '').toLowerCase().trim();
-                    var cls = (el.className || '').toString().toLowerCase();
-                    var oc = (el.getAttribute('onclick') || '').toLowerCase();
-                    if (t.indexOf('приступить к просмотру') !== -1 || t.indexOf('начать просмотр') !== -1 || t.indexOf('start watching') !== -1 ||
-                        cls.indexOf('btn_play') !== -1 || oc.indexOf('start_youtube') !== -1 || oc.indexOf('func_start') !== -1) {
-                        var dur = extractDur(el);
-                        var rawClickHref = (a ? a.href : '') || (el.getAttribute ? el.getAttribute('href') : '') || '';
-                        var fullClickHref = resolveFullUrl(rawClickHref);
-                        if (window.AvisoBridge && window.AvisoBridge.openNewTab) {
-                            if (fullClickHref && (fullClickHref.indexOf('/vl/') !== -1 || fullClickHref.indexOf('youtube') !== -1 || fullClickHref.indexOf('create_session') !== -1)) {
-                                e.preventDefault();
-                                handleOpenUrl(fullClickHref, dur);
-                            }
-                        }
-                    }
-                }, true);
             } catch(e) {}
         })();
     """
@@ -812,30 +763,24 @@ object AvisoTaskParser {
                     }
                 }
 
-                // 3. YouTube Iframes: Trigger playback ONCE and launch in YouTube App
-                if (!window._avisoVideoPlayTriggered) {
-                    window._avisoVideoPlayTriggered = true;
-                    var iframes = document.querySelectorAll('iframe[src*="youtube"], iframe[src*="youtu.be"], iframe#video-click, iframe');
-                    for (var f = 0; f < iframes.length; f++) {
-                        var ifr = iframes[f];
-                        var src = (ifr.getAttribute('src') || ifr.src || '').toString();
-                        if ((src.indexOf('youtube.com') !== -1 || src.indexOf('youtu.be') !== -1) && !window._avisoYtAppOpened) {
-                            window._avisoYtAppOpened = true;
-                            if (window.AvisoBridge && window.AvisoBridge.openInYouTubeApp) {
-                                window.AvisoBridge.openInYouTubeApp(src);
-                            }
-                        }
-                        try {
-                            ifr.contentWindow.postMessage('{"event":"command","func":"playVideo","args":""}', '*');
-                            ifr.contentWindow.postMessage('{"event":"command","func":"unMute","args":""}', '*');
-                        } catch(e) {}
-                    }
+                // 3. YouTube Iframes and Video Embeds: Continuously trigger playback & unmuting
+                var iframes = document.querySelectorAll('iframe[src*="youtube"], iframe[src*="youtu.be"], iframe#video-click, iframe');
+                for (var f = 0; f < iframes.length; f++) {
+                    var ifr = iframes[f];
+                    try {
+                        ifr.contentWindow.postMessage('{"event":"command","func":"playVideo","args":""}', '*');
+                        ifr.contentWindow.postMessage('{"event":"command","func":"unMute","args":""}', '*');
+                    } catch(e) {}
+                }
 
-                    // Click initial play overlay once
-                    var startButtons = document.querySelectorAll('#video-click, .video-click, #start_video, .start-video, .ytp-large-play-button, button.btn-play, [class*="play_btn"], a[onclick*="start"], button[onclick*="start"]');
+                // Click play overlay / button if present
+                for (var dPlay = 0; dPlay < docs.length; dPlay++) {
+                    var startButtons = docs[dPlay].querySelectorAll('#video-click, .video-click, #start_video, .start-video, .ytp-large-play-button, button.ytp-large-play-button, .ytp-play-button, button.btn-play, [class*="play_btn"], a[onclick*="start"], button[onclick*="start"]');
                     for (var s = 0; s < startButtons.length; s++) {
                         try {
-                            startButtons[s].click();
+                            if (startButtons[s].offsetParent !== null) {
+                                startButtons[s].click();
+                            }
                         } catch(e) {}
                     }
                 }

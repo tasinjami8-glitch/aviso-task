@@ -12,9 +12,11 @@ import android.os.Message
 import android.os.PowerManager
 import android.os.SystemClock
 import android.view.MotionEvent
+import android.view.View
 import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
+import android.webkit.PermissionRequest
 import android.webkit.SslErrorHandler
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
@@ -1247,20 +1249,26 @@ fun AvisoBrowserScreen(
                                     }
                                 }
 
-                                override fun onCreateWindow(
+                                 override fun onCreateWindow(
                                     view: WebView?,
                                     isDialog: Boolean,
                                     isUserGesture: Boolean,
                                     resultMsg: Message?
                                 ): Boolean {
                                     val mainWv = view ?: return false
+                                    CookieManager.getInstance().flush()
                                     val tempWebView = WebView(mainWv.context).apply {
+                                        val cookieManager = CookieManager.getInstance()
+                                        cookieManager.setAcceptCookie(true)
+                                        cookieManager.setAcceptThirdPartyCookies(this, true)
                                         settings.javaScriptEnabled = true
                                         settings.domStorageEnabled = true
+                                        settings.databaseEnabled = true
+                                        settings.mediaPlaybackRequiresUserGesture = false
                                         settings.userAgentString = mainWv.settings.userAgentString
                                     }
                                     tempWebView.webViewClient = object : WebViewClient() {
-                                        private fun handleNewWindow(targetUrl: String) {
+                                        private fun handleNewWindow(targetUrl: String, v: WebView?) {
                                             if (targetUrl.isNotEmpty() && targetUrl != "about:blank") {
                                                 mainWv.post {
                                                     val isVideoLink = targetUrl.contains("youtube.com") ||
@@ -1271,7 +1279,7 @@ fun AvisoBrowserScreen(
                                                             targetUrl.contains("youtube.php")
                                                     if (isVideoLink) {
                                                         if (uiState.openInExternalYouTubeApp && (targetUrl.contains("youtube.com") || targetUrl.contains("youtu.be"))) {
-                                                            launchYouTubeApp(ctx, targetUrl)
+                                                             launchYouTubeApp(ctx, targetUrl)
                                                         } else {
                                                             viewModel.openVideoTab(targetUrl, 20)
                                                         }
@@ -1281,20 +1289,19 @@ fun AvisoBrowserScreen(
                                                         viewModel.addNewTab(targetUrl, "ট্যাব ${uiState.tabs.size + 1}")
                                                     }
                                                 }
+                                                v?.postDelayed({ v.destroy() }, 800L)
                                             }
                                         }
 
                                         override fun shouldOverrideUrlLoading(v: WebView?, request: WebResourceRequest?): Boolean {
                                             val targetUrl = request?.url?.toString().orEmpty()
-                                            handleNewWindow(targetUrl)
-                                            v?.destroy()
+                                            handleNewWindow(targetUrl, v)
                                             return true
                                         }
 
                                         override fun onPageStarted(v: WebView?, url: String?, favicon: Bitmap?) {
                                             val targetUrl = url.orEmpty()
-                                            handleNewWindow(targetUrl)
-                                            v?.destroy()
+                                            handleNewWindow(targetUrl, v)
                                         }
                                     }
                                     val transport = resultMsg?.obj as? WebView.WebViewTransport
@@ -1584,6 +1591,7 @@ fun AvisoBrowserScreen(
                                         ViewGroup.LayoutParams.MATCH_PARENT,
                                         ViewGroup.LayoutParams.MATCH_PARENT
                                     )
+                                    setLayerType(View.LAYER_TYPE_HARDWARE, null)
                                     val cookieManager = CookieManager.getInstance()
                                     cookieManager.setAcceptCookie(true)
                                     cookieManager.setAcceptThirdPartyCookies(this, true)
@@ -1592,6 +1600,8 @@ fun AvisoBrowserScreen(
                                         javaScriptEnabled = true
                                         domStorageEnabled = true
                                         databaseEnabled = true
+                                        allowContentAccess = true
+                                        allowFileAccess = true
                                         loadWithOverviewMode = true
                                         useWideViewPort = true
                                         mediaPlaybackRequiresUserGesture = false
@@ -1649,7 +1659,14 @@ fun AvisoBrowserScreen(
                                         "AvisoBridge"
                                     )
 
-                                    webChromeClient = WebChromeClient()
+                                    webChromeClient = object : WebChromeClient() {
+                                        override fun onPermissionRequest(request: PermissionRequest?) {
+                                            request?.grant(request.resources)
+                                        }
+                                        override fun getDefaultVideoPoster(): Bitmap? {
+                                            return Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
+                                        }
+                                    }
                                     webViewClient = object : WebViewClient() {
                                         override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                                             val url = request?.url?.toString() ?: return false
