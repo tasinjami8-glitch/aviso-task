@@ -1362,8 +1362,8 @@ object AvisoTaskParser {
 
     /**
      * Highlights the "Confirm view" (Подтвердить просмотр / Проверить) button belonging to the EXACT
-     * task row that was watched, scrolls it into center view, and draws an animated green glow around it.
-     * Stays ready for the user to click and complete without automatic clicking.
+     * task row that was processed, scrolls it into center view, and draws an animated pulsing green glow around it.
+     * Leaves the control visible, accessible, and pending for manual confirmation by the user without automatically clicking.
      */
     const val JS_HIGHLIGHT_CONFIRM_BUTTON = """
         (function() {
@@ -1376,48 +1376,87 @@ object AvisoTaskParser {
                     var id = (el.id || '').toLowerCase();
 
                     if (!t && !cls && !oc && !id) return false;
-                    if (t.indexOf('отмена') !== -1 || t.indexOf('cancel') !== -1 || t.indexOf('жалоб') !== -1) return false;
+                    if (t.indexOf('отмена') !== -1 || t.indexOf('cancel') !== -1 || t.indexOf('жалоб') !== -1 || t.indexOf('delete') !== -1) return false;
 
                     if (t.indexOf('подтвердить просмотр') !== -1 ||
                         t.indexOf('подтвердить') !== -1 ||
+                        t.indexOf('подтверждаю') !== -1 ||
                         t.indexOf('проверить просмотр') !== -1 ||
                         t.indexOf('проверить выполнение') !== -1 ||
+                        t.indexOf('проверить задание') !== -1 ||
                         t.indexOf('проверить') !== -1 ||
                         t.indexOf('забрать награду') !== -1 ||
                         t.indexOf('получить вознаграждение') !== -1 ||
                         t.indexOf('получить деньги') !== -1 ||
                         t.indexOf('получить') !== -1 ||
+                        t.indexOf('клик для подтверждения') !== -1 ||
+                        t.indexOf('нажмите для подтверждения') !== -1 ||
+                        t.indexOf('засчитать просмотр') !== -1 ||
                         t.indexOf('confirm view') !== -1 ||
                         t.indexOf('confirm') !== -1 ||
                         t.indexOf('verify') !== -1 ||
-                        t.indexOf('check') !== -1) {
+                        t.indexOf('check') !== -1 ||
+                        t.indexOf('claim') !== -1 ||
+                        t.indexOf('নিশ্চিত করুন') !== -1) {
                         return true;
                     }
 
                     if (cls.indexOf('btn_confirm') !== -1 || cls.indexOf('btn_check') !== -1 ||
                         cls.indexOf('confirm-btn') !== -1 || cls.indexOf('btn_success') !== -1 ||
                         cls.indexOf('btn-success') !== -1 || cls.indexOf('btn_verify') !== -1 ||
-                        oc.indexOf('confirm') !== -1 || oc.indexOf('check') !== -1 ||
+                        cls.indexOf('btn-verify') !== -1 ||
+                        oc.indexOf('confirm') !== -1 || oc.indexOf('check') !== -1 || oc.indexOf('verify') !== -1 ||
                         id.indexOf('confirm') !== -1 || id.indexOf('btn_check') !== -1) {
                         return true;
                     }
                     return false;
                 }
 
+                // 1. Locate the exact task row processed
                 var targetRow = (window._avisoLastTaskRow && document.body.contains(window._avisoLastTaskRow)) ? window._avisoLastTaskRow : 
                                 (window._avisoLastTaskId ? document.getElementById(window._avisoLastTaskId) : null);
                 
+                var targetCell = (window._avisoLastTaskCell && document.body.contains(window._avisoLastTaskCell)) ? window._avisoLastTaskCell : null;
+                if (!targetCell && targetRow) {
+                    if (window._avisoLastTaskCellIndex !== undefined && window._avisoLastTaskCellIndex >= 0 && targetRow.cells && targetRow.cells[window._avisoLastTaskCellIndex]) {
+                        targetCell = targetRow.cells[window._avisoLastTaskCellIndex];
+                    }
+                }
+
                 var btn = null;
-                if (targetRow) {
-                    var candidates = targetRow.querySelectorAll('button, a, input, span, div, [role="button"]');
-                    for (var c = 0; c < candidates.length; c++) {
-                        if (isConfirmBtn(candidates[c])) {
-                            btn = candidates[c];
+
+                // Check in exact cell first
+                if (targetCell) {
+                    var cellEls = targetCell.querySelectorAll('button, a, input, span, div, [role="button"]');
+                    for (var c = 0; c < cellEls.length; c++) {
+                        if (isConfirmBtn(cellEls[c])) {
+                            btn = cellEls[c];
+                            break;
+                        }
+                    }
+                    if (!btn && cellEls.length > 0) {
+                        for (var c2 = 0; c2 < cellEls.length; c2++) {
+                            var tag = cellEls[c2].tagName.toUpperCase();
+                            if (tag === 'BUTTON' || tag === 'A' || tag === 'INPUT' || (cellEls[c2].className || '').indexOf('btn') !== -1) {
+                                btn = cellEls[c2];
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                // Check in exact row
+                if (!btn && targetRow) {
+                    var rowEls = targetRow.querySelectorAll('button, a, input, span, div, [role="button"]');
+                    for (var r = 0; r < rowEls.length; r++) {
+                        if (isConfirmBtn(rowEls[r])) {
+                            btn = rowEls[r];
                             break;
                         }
                     }
                 }
 
+                // Fallback to any visible confirm button
                 if (!btn) {
                     var all = document.querySelectorAll('button, a, input, span, div, [role="button"]');
                     for (var a = 0; a < all.length; a++) {
@@ -1428,12 +1467,22 @@ object AvisoTaskParser {
                     }
                 }
 
-                if (btn) {
-                    try { btn.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch(e) {}
-                    btn.style.outline = '4px solid #16a34a';
-                    btn.style.boxShadow = '0 0 24px rgba(22, 163, 74, 0.9)';
-                    btn.style.borderRadius = '8px';
-                    btn.style.transition = 'all 0.3s ease-in-out';
+                var highlightTarget = btn || targetCell || targetRow;
+
+                if (highlightTarget) {
+                    try { highlightTarget.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch(e) {}
+                    
+                    highlightTarget.style.outline = '4px solid #22c55e';
+                    highlightTarget.style.boxShadow = '0 0 25px rgba(34, 197, 94, 0.9)';
+                    highlightTarget.style.borderRadius = '8px';
+                    highlightTarget.style.transition = 'all 0.3s ease-in-out';
+                    highlightTarget.style.backgroundColor = 'rgba(34, 197, 94, 0.15)';
+                    highlightTarget.setAttribute('title', 'Viewing completed! Click to confirm.');
+
+                    if (targetRow && targetRow !== highlightTarget) {
+                        targetRow.style.backgroundColor = 'rgba(34, 197, 94, 0.08)';
+                        targetRow.style.borderLeft = '6px solid #22c55e';
+                    }
                 }
             } catch(e) {}
         })();

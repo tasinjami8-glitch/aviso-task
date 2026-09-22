@@ -439,15 +439,10 @@ fun AvisoBrowserScreen(
         bringAppToFront(context)
         AvisoNotificationHelper.sendAutoWorkFinishedNotification(context)
         if (!uiState.isAutoWorkRunning) {
-            delay(1500L)
-            for (attempt in 1..10) {
-                webViewRef?.evaluateJavascript(AvisoTaskParser.JS_AUTO_WORK_CLICK_CONFIRM, null)
-                webViewRef?.evaluateJavascript(AvisoTaskParser.JS_START_AND_WATCH_VIDEO, null)
-                secondaryWebViewRef?.evaluateJavascript(AvisoTaskParser.JS_AUTO_WORK_CLICK_CONFIRM, null)
-                secondaryWebViewRef?.evaluateJavascript(AvisoTaskParser.JS_START_AND_WATCH_VIDEO, null)
-                delay(800L)
-            }
-            Toast.makeText(context, "🎬 ভিডিও দেখা সম্পন্ন ও কনফার্ম করা হয়েছে ✓", Toast.LENGTH_SHORT).show()
+            delay(1000L)
+            webViewRef?.evaluateJavascript(AvisoTaskParser.JS_HIGHLIGHT_CONFIRM_BUTTON, null)
+            secondaryWebViewRef?.evaluateJavascript(AvisoTaskParser.JS_HIGHLIGHT_CONFIRM_BUTTON, null)
+            Toast.makeText(context, "Viewing time completed. Click Confirm view for this task.", Toast.LENGTH_LONG).show()
         }
         delay(2000L)
         manualWatchTotal = null
@@ -496,24 +491,11 @@ fun AvisoBrowserScreen(
             viewModel.closeVideoTab()
             viewModel.selectTab(0)
 
-            // Step 2: Wait for Tab 1 to regain focus and render "Подтвердить просмотр" / confirm button
+            // Step 2: Wait for Tab 1 to regain focus and highlight Confirm View control without clicking
             delay(1200L)
+            webViewRef?.evaluateJavascript(AvisoTaskParser.JS_HIGHLIGHT_CONFIRM_BUTTON, null)
 
-            // Step 3: Automatically click "Confirm view" / "Подтвердить просмотр" on the exact task row
-            for (attempt in 1..8) {
-                webViewRef?.evaluateJavascript(AvisoTaskParser.JS_AUTO_WORK_CLICK_CONFIRM, null)
-                delay(500L)
-            }
-
-            Toast.makeText(context, "🎬 ভিডিও দেখা সম্পন্ন ও ভিউ কনফার্ম করা হয়েছে ✓", Toast.LENGTH_SHORT).show()
-
-            // Step 4: Wait 1.8s and automatically refresh the page
-            delay(1800L)
-            if (webViewRef?.url?.contains("tasks-youtube") == true) {
-                webViewRef?.reload()
-            } else {
-                webViewRef?.loadUrl("https://aviso.bz/tasks-youtube")
-            }
+            Toast.makeText(context, "Viewing time completed. Click Confirm view for this task.", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -667,46 +649,24 @@ fun AvisoBrowserScreen(
                 viewModel.setAutoWorkStatus("ভিডিও দেখা শেষ! আগের ট্যাবে ফিরে যাওয়া হচ্ছে...")
                 viewModel.closeVideoTab()
                 viewModel.selectTab(0)
-                delay(1500L) // Allow Tab 1 to regain focus and render confirm button
+                delay(1500L) // Allow Tab 1 to regain focus
             } else {
                 delay(1000L)
             }
 
-            // Step 4: Automatically click "Confirm view" (Подтвердить просмотр / Проверить) on the exact task row
-            viewModel.setAutoWorkStatus("আগের ট্যাবে টাস্ক নিশ্চিতকরণ (Confirm View) করা হচ্ছে...")
-            var isConfirmed = false
-            for (attempt in 1..8) {
-                webViewRef?.evaluateJavascript(AvisoTaskParser.JS_AUTO_WORK_CLICK_CONFIRM, null)
-                delay(600L)
-                if (taskCompletedSignal || confirmClickedSignal) {
-                    isConfirmed = true
-                    break
-                }
-            }
+            // Step 4: Locate and highlight the Confirm View control on the exact task row (Manual Pending Confirmation)
+            viewModel.setAutoWorkStatus("ভিডিও দেখা সম্পন্ন — কনফার্মেশন অপেক্ষমান (Confirmation Pending) | Confirm view ক্লিক করুন")
+            webViewRef?.evaluateJavascript(AvisoTaskParser.JS_HIGHLIGHT_CONFIRM_BUTTON, null)
+            viewModel.incrementSuccessCount()
 
-            // Record success or failure
-            val currentFinishUrl = webViewRef?.url.orEmpty()
-            if (isConfirmed || taskCompletedSignal || confirmClickedSignal || !currentFinishUrl.contains("tasks-youtube")) {
-                viewModel.incrementSuccessCount()
-                viewModel.setAutoWorkStatus("টাস্ক সফল হয়েছে! ✓ (মোট সফল: ${uiState.successfulTasksCount + 1})")
-            } else {
-                viewModel.incrementFailedCount()
-                viewModel.setAutoWorkStatus("টাস্ক কনফার্ম করা যায়নি (ব্যর্থ) ✗")
-            }
+            Toast.makeText(context, "Viewing time completed. Click Confirm view for this task.", Toast.LENGTH_LONG).show()
 
-            // Step 5: Wait 1.8 seconds for reward confirmation to settle and automatically reload/refresh the page
-            delay(1800L)
-            viewModel.setAutoWorkStatus("টাস্ক সম্পন্ন হয়েছে! পেজ রিফ্রেশ করা হচ্ছে...")
-            if (webViewRef?.url?.contains("tasks-youtube") == true) {
-                webViewRef?.reload()
-                delay(3000L)
-            } else {
-                webViewRef?.loadUrl("https://aviso.bz/tasks-youtube")
-                delay(3000L)
-            }
-
-            viewModel.setAutoWorkStatus("পরবর্তী কাজে যাওয়া হচ্ছে...")
-            delay(1000L)
+            // Keep the task in a "Viewing completed — confirmation pending" state.
+            // Do NOT click Confirm view automatically.
+            // Do NOT reload or refresh away the pending confirm button.
+            // The task remains available with its confirmation control pending for manual confirmation by user.
+            delay(3000L)
+            viewModel.setAutoWorkStatus("টাস্কের কনফার্মেশন অপেক্ষমান রাখা হয়েছে ✓")
         }
     }
 
