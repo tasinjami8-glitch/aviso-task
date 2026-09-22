@@ -142,14 +142,27 @@ object AvisoTaskParser {
     const val JS_SETUP_OVERRIDE = """
         (function() {
             try {
-                function handleOpenUrl(url) {
+                function extractDur(el) {
+                    try {
+                        var row = el.closest ? (el.closest('tr') || el.closest('.work-serf') || el.closest('.task-item') || el.closest('div')) : null;
+                        var txt = (row ? row.innerText : '') || (document.body ? document.body.innerText : '') || '';
+                        var mS = txt.match(/(\d+)\s*(?:сек|sec|секунд)/i);
+                        if (mS) return parseInt(mS[1], 10) || 20;
+                        var mM = txt.match(/(\d+)\s*(?:min|минут)/i);
+                        if (mM) return (parseInt(mM[1], 10) || 1) * 60;
+                    } catch(e) {}
+                    return 20;
+                }
+
+                function handleOpenUrl(url, duration) {
                     if (!url || url === 'about:blank' || url.indexOf('javascript:') === 0) return;
+                    var dur = duration || 20;
                     var isYT = (url.indexOf('youtube.com') !== -1 || url.indexOf('youtu.be') !== -1);
                     var isSession = (url.indexOf('/vl/') !== -1 || url.indexOf('/go/') !== -1 || url.indexOf('create_session') !== -1 || url.indexOf('youtube.php') !== -1);
                     
                     if (isYT || isSession) {
                         if (window.AvisoBridge && window.AvisoBridge.openNewTab) {
-                            window.AvisoBridge.openNewTab(url, 20);
+                            window.AvisoBridge.openNewTab(url, dur);
                             return;
                         }
                     } else {
@@ -164,17 +177,17 @@ object AvisoTaskParser {
                 // Override window.open to delegate to separate Tab system
                 window.open = function(url, target, features) {
                     if (url) {
-                        handleOpenUrl(url);
+                        handleOpenUrl(url, 20);
                     }
                     return {
                         closed: false,
                         close: function() {},
                         focus: function() {},
                         location: {
-                            set href(val) { handleOpenUrl(val); },
+                            set href(val) { handleOpenUrl(val, 20); },
                             get href() { return window.location.href; },
-                            replace: function(val) { handleOpenUrl(val); },
-                            assign: function(val) { handleOpenUrl(val); }
+                            replace: function(val) { handleOpenUrl(val, 20); },
+                            assign: function(val) { handleOpenUrl(val, 20); }
                         },
                         document: {
                             write: function() {},
@@ -183,10 +196,12 @@ object AvisoTaskParser {
                     };
                 };
 
-                // Capture clicks on document: if a link opens in new tab/window or YouTube/session, route to Tab system
+                // Capture clicks on document: if a link opens in new tab/window or YouTube/session or Start Watching button, route to Tab system
                 document.addEventListener('click', function(e) {
                     var el = e.target;
-                    var a = (el && el.tagName === 'A') ? el : (el && el.closest ? el.closest('a') : null);
+                    if (!el) return;
+
+                    var a = (el.tagName === 'A') ? el : (el.closest ? el.closest('a') : null);
                     if (a) {
                         var href = (a.getAttribute('href') || a.href || '').toString();
                         var target = (a.getAttribute('target') || '').toLowerCase();
@@ -195,8 +210,25 @@ object AvisoTaskParser {
                         
                         if (isYT || isSession || target === '_blank') {
                             e.preventDefault();
-                            handleOpenUrl(a.getAttribute('href') || a.href);
+                            var d = extractDur(a);
+                            handleOpenUrl(a.getAttribute('href') || a.href, d);
                             return;
+                        }
+                    }
+
+                    // Check if clicked element is "Приступить к просмотру" / Start Watching button
+                    var t = (el.innerText || el.value || '').toLowerCase().trim();
+                    var cls = (el.className || '').toString().toLowerCase();
+                    var oc = (el.getAttribute('onclick') || '').toLowerCase();
+                    if (t.indexOf('приступить к просмотру') !== -1 || t.indexOf('начать просмотр') !== -1 || t.indexOf('start watching') !== -1 ||
+                        cls.indexOf('btn_play') !== -1 || oc.indexOf('start_youtube') !== -1 || oc.indexOf('func_start') !== -1) {
+                        var dur = extractDur(el);
+                        if (window.AvisoBridge && window.AvisoBridge.openNewTab) {
+                            var clickHref = (a ? a.href : '') || (el.getAttribute ? el.getAttribute('href') : '') || '';
+                            if (clickHref && (clickHref.indexOf('/vl/') !== -1 || clickHref.indexOf('youtube') !== -1)) {
+                                e.preventDefault();
+                                handleOpenUrl(clickHref, dur);
+                            }
                         }
                     }
                 }, true);

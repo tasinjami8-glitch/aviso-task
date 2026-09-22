@@ -354,6 +354,14 @@ fun AvisoBrowserScreen(
         }
     }
 
+    // When Video Tab URL changes or is opened, load in secondary video webview
+    LaunchedEffect(uiState.videoTabUrl) {
+        val url = uiState.videoTabUrl
+        if (!url.isNullOrBlank() && secondaryWebViewRef?.url != url) {
+            secondaryWebViewRef?.loadUrl(url)
+        }
+    }
+
     // Periodic task scan while active (only when auto-work is not busy clicking)
     LaunchedEffect(Unit) {
         while (true) {
@@ -1257,10 +1265,20 @@ fun AvisoBrowserScreen(
                             webViewClient = object : WebViewClient() {
                                 override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                                     val url = request?.url?.toString() ?: return false
+                                    
+                                    // Handle intent / deep links
                                     if (url.startsWith("intent:") || url.startsWith("vnd.youtube:")) {
                                         try {
                                             val intent = Intent.parseUri(url, Intent.URI_INTENT_SCHEME)
                                             val fallback = intent.getStringExtra("browser_fallback_url")
+                                            val target = if (!fallback.isNullOrEmpty()) fallback else url
+                                            if (target.contains("youtube.com") || target.contains("youtu.be") || target.contains("/vl/") || target.contains("/go/")) {
+                                                if (uiState.openInExternalYouTubeApp) {
+                                                    launchYouTubeApp(ctx, target)
+                                                }
+                                                viewModel.openVideoTab(target, 20)
+                                                return true
+                                            }
                                             if (!fallback.isNullOrEmpty() && fallback.contains("aviso.bz")) {
                                                 view?.loadUrl(fallback)
                                                 return true
@@ -1269,13 +1287,52 @@ fun AvisoBrowserScreen(
                                         } catch (_: Exception) {}
                                         return true
                                     }
+
+                                    // Intercept YouTube & Video Task URLs into dedicated Video Tab
+                                    val isYT = url.contains("youtube.com") || url.contains("youtu.be")
+                                    val isVideoTaskLink = url.contains("/vl/") || url.contains("/go/") || url.contains("create_session") || url.contains("youtube.php")
+                                    if (isYT || isVideoTaskLink) {
+                                        if (uiState.openInExternalYouTubeApp) {
+                                            launchYouTubeApp(ctx, url)
+                                        }
+                                        viewModel.openVideoTab(url, 20)
+                                        return true // Stop main Aviso page from being replaced
+                                    }
+
+                                    // For other URLs
                                     if (url.startsWith("http://") || url.startsWith("https://")) {
+                                        val uri = Uri.parse(url)
+                                        val host = uri.host.orEmpty().lowercase()
+                                        // If external non-aviso site, open in new tab
+                                        if (host.isNotEmpty() && !host.contains("aviso.bz") && !host.contains("google.com") && !host.contains("recaptcha") && !host.contains("hcaptcha") && !host.contains("cloudflare")) {
+                                            viewModel.addNewTab(url, uri.host ?: "ট্যাব")
+                                            return true
+                                        }
                                         return false // Load inside this WebView
                                     }
                                     return true
                                 }
 
                                 override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                                    val currentUrlStr = url.orEmpty()
+                                    val isYT = currentUrlStr.contains("youtube.com") || currentUrlStr.contains("youtu.be")
+                                    val isVideoTaskLink = currentUrlStr.contains("/vl/") || currentUrlStr.contains("/go/") || currentUrlStr.contains("create_session") || currentUrlStr.contains("youtube.php")
+
+                                    // Safety fallback: if somehow main tab navigated to YouTube, stop and route to Video Tab
+                                    if (isYT || isVideoTaskLink) {
+                                        view?.stopLoading()
+                                        if (view?.canGoBack() == true) {
+                                            view.goBack()
+                                        } else {
+                                            view?.loadUrl("https://aviso.bz/tasks-youtube")
+                                        }
+                                        if (uiState.openInExternalYouTubeApp) {
+                                            launchYouTubeApp(ctx, currentUrlStr)
+                                        }
+                                        viewModel.openVideoTab(currentUrlStr, 20)
+                                        return
+                                    }
+
                                     canGoBack = view?.canGoBack() == true
                                     viewModel.setErrorMessage(null)
                                     // Pre-override window.open early
@@ -1404,23 +1461,48 @@ fun AvisoBrowserScreen(
                                         }
                                     }
 
-                                    OutlinedButton(
-                                        onClick = {
-                                            viewModel.closeVideoTab()
-                                            viewModel.selectTab(0)
-                                        },
-                                        modifier = Modifier.height(32.dp),
-                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                                        border = BorderStroke(1.dp, Color(0xFFEF4444))
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                                     ) {
-                                        Icon(
-                                            Icons.Default.Close,
-                                            contentDescription = null,
-                                            tint = Color(0xFFEF4444),
-                                            modifier = Modifier.size(14.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text("ট্যাব বন্ধ", fontSize = 11.sp, color = Color(0xFFEF4444))
+                                        // Open in YouTube App button
+                                        OutlinedButton(
+                                            onClick = {
+                                                uiState.videoTabUrl?.let { launchYouTubeApp(context, it) }
+                                            },
+                                            modifier = Modifier.height(32.dp),
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                            border = BorderStroke(1.dp, Color(0xFF38BDF8))
+                                        ) {
+                                            Icon(
+                                                Icons.Default.PlayArrow,
+                                                contentDescription = null,
+                                                tint = Color(0xFF38BDF8),
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(3.dp))
+                                            Text("YouTube অ্যাপ", fontSize = 11.sp, color = Color(0xFF38BDF8))
+                                        }
+
+                                        // Close tab button
+                                        OutlinedButton(
+                                            onClick = {
+                                                viewModel.closeVideoTab()
+                                                viewModel.selectTab(0)
+                                            },
+                                            modifier = Modifier.height(32.dp),
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                            border = BorderStroke(1.dp, Color(0xFFEF4444))
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Close,
+                                                contentDescription = null,
+                                                tint = Color(0xFFEF4444),
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(3.dp))
+                                            Text("ট্যাব বন্ধ", fontSize = 11.sp, color = Color(0xFFEF4444))
+                                        }
                                     }
                                 }
 
@@ -1461,13 +1543,35 @@ fun AvisoBrowserScreen(
                                         loadWithOverviewMode = true
                                         useWideViewPort = true
                                         mediaPlaybackRequiresUserGesture = false
+                                        setSupportMultipleWindows(true)
+                                        mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                                        cacheMode = WebSettings.LOAD_DEFAULT
                                         userAgentString = "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36"
                                     }
 
                                     webChromeClient = WebChromeClient()
                                     webViewClient = object : WebViewClient() {
+                                        override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                                            val url = request?.url?.toString() ?: return false
+                                            if (url.startsWith("intent:") || url.startsWith("vnd.youtube:")) {
+                                                try {
+                                                    val intent = Intent.parseUri(url, Intent.URI_INTENT_SCHEME)
+                                                    ctx.startActivity(intent)
+                                                } catch (_: Exception) {}
+                                                return true
+                                            }
+                                            return false
+                                        }
+
                                         override fun onPageFinished(view: WebView?, url: String?) {
                                             view?.evaluateJavascript(AvisoTaskParser.JS_START_AND_WATCH_VIDEO, null)
+                                            view?.postDelayed({
+                                                view.evaluateJavascript(AvisoTaskParser.JS_START_AND_WATCH_VIDEO, null)
+                                            }, 1200L)
+                                        }
+
+                                        override fun onReceivedSslError(view: WebView?, handler: SslErrorHandler?, error: SslError?) {
+                                            handler?.proceed()
                                         }
                                     }
 
@@ -1477,6 +1581,10 @@ fun AvisoBrowserScreen(
                             },
                             update = { wv ->
                                 secondaryWebViewRef = wv
+                                val curVideoUrl = uiState.videoTabUrl
+                                if (!curVideoUrl.isNullOrEmpty() && wv.url != curVideoUrl) {
+                                    wv.loadUrl(curVideoUrl)
+                                }
                             }
                         )
                     }
