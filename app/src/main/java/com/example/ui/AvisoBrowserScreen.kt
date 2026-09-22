@@ -744,10 +744,10 @@ fun AvisoBrowserScreen(
                 viewModel.reportSafeRecovery()
             }
 
-            // Step 8: Confirm View Remains PENDING for user
+            // Step 8: Confirm View Remains PENDING for user (No Auto-Click, No Task Marking)
             viewModel.setAutomationState(AutomationState.CONFIRM_VIEW_PENDING)
-            viewModel.setAutoWorkStatus("কনফার্ম ভিউ পেন্ডিং (User interaction required)")
-            viewModel.addAutomationLog("[Task] Step 8: Highlighted Confirm View button. Left pending for user.")
+            viewModel.setAutoWorkStatus("কনফার্ম ভিউ পেন্ডিং (Confirm View untouched / User manual)")
+            viewModel.addAutomationLog("[Task] Step 8: Confirm View untouched & natural. Left pending for user.")
             webViewRef?.evaluateJavascript(AvisoTaskParser.JS_HIGHLIGHT_CONFIRM_BUTTON, null)
             delay(1500L)
 
