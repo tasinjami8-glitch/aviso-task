@@ -580,13 +580,17 @@ fun AvisoBrowserScreen(
                 viewModel.reportSafeRecovery()
             }
 
-            // Step 1: Scan & Find next video task or handle pending Confirm View with strict Task Container Lock
-            viewModel.setAutomationState(AutomationState.TASK_DISCOVERED)
-            viewModel.setAutoWorkStatus("টাস্ক তালিকা স্ক্যান ও কনফার্ম ভিউ চেক করা হচ্ছে...")
-            viewModel.addAutomationLog("[Task] Scanning task table for next valid YouTube task / pending Confirm View")
+            // Step 1: Scan & Find ONE task only
+            viewModel.setAutomationState(AutomationState.TASK_FOUND)
+            viewModel.setAutoWorkStatus("টাস্ক খোঁজা হচ্ছে (Step 1: One Task Only)...")
+            viewModel.addAutomationLog("[Task] Step 1: Scanning for single active task session")
             webViewRef?.evaluateJavascript(AvisoTaskParser.JS_AUTO_WORK_FIND_AND_CLICK, null)
 
-            // Wait for task detection or pending confirm click (up to 4 seconds)
+            // Step 2 & 3: Read viewing time & copy exact video link
+            viewModel.setAutomationState(AutomationState.READ_VIEW_TIME)
+            viewModel.setAutoWorkStatus("টাস্কের নির্ধারিত সময় ও ভিডিও লিংক রিড করা হচ্ছে...")
+
+            // Wait for task detection (up to 4 seconds)
             var waited = 0
             while (autoWorkTaskStartedSignal == null && !confirmClickedSignal && !uiState.isVideoTabOpen && !autoWorkNoTasksSignal && waited < 40 && uiState.isAutoWorkRunning) {
                 delay(100L)
@@ -599,22 +603,11 @@ fun AvisoBrowserScreen(
 
             if (!uiState.isAutoWorkRunning) break
 
-            // If a pending Confirm View button was detected and clicked on the page:
-            if (confirmClickedSignal) {
-                viewModel.incrementSuccessCount()
-                viewModel.setAutoWorkStatus("পেন্ডিং কনফার্ম ভিউ ক্লিক সম্পন্ন হয়েছে ✓")
-                viewModel.addAutomationLog("[Task] Confirmed pending view successfully. Checking next tasks...")
-                delay(1500L)
-                // Refresh task table to get updated status/tasks
-                webViewRef?.loadUrl("https://aviso.bz/tasks-youtube")
-                delay(3000L)
-                continue
-            }
-
             // If no tasks are currently detected on page, attempt one reload to see if new tasks appeared
             if (autoWorkNoTasksSignal && !uiState.isVideoTabOpen) {
                 if (!didReloadForTasks) {
                     didReloadForTasks = true
+                    viewModel.setAutomationState(AutomationState.REFRESH_ONCE)
                     viewModel.setAutoWorkStatus("নতুন কাজ চেক করতে পেজ রিফ্রেশ হচ্ছে...")
                     viewModel.addAutomationLog("[Task] No immediate tasks, reloading tasks-youtube")
                     webViewRef?.loadUrl("https://aviso.bz/tasks-youtube")
@@ -647,6 +640,7 @@ fun AvisoBrowserScreen(
                     (realTimerSecondsSignal > 0)
 
             if (!isStarted) {
+                viewModel.setAutomationState(AutomationState.REFRESH_ONCE)
                 viewModel.setAutoWorkStatus("টাস্ক শুরু হয়নি, পেজ রিফ্রেশ করা হচ্ছে...")
                 viewModel.addAutomationLog("[Task] No active video task started. Reloading task list to recover.")
                 webViewRef?.loadUrl("https://aviso.bz/tasks-youtube")
@@ -654,17 +648,28 @@ fun AvisoBrowserScreen(
                 continue
             }
 
-            var taskDuration = (autoWorkTaskStartedSignal?.takeIf { it > 0 } ?: realInterstitialDurationSignal?.takeIf { it > 0 } ?: uiState.videoTabDuration.takeIf { it > 0 } ?: 15).coerceAtLeast(5)
-            var totalDurationWithBuffer = taskDuration + 1 // +1 second extra wait buffer as requested
+            // Step 3 & 4: Copy exact video URL & Open Video
+            viewModel.setAutomationState(AutomationState.COPY_EXACT_VIDEO_URL)
+            viewModel.addAutomationLog("[Task] Step 3: Exact video link copied for current task")
+            delay(300L)
 
-            viewModel.setAutomationState(AutomationState.VIEWING)
-            viewModel.setAutoWorkStatus("ভিডিও দেখা হচ্ছে ($totalDurationWithBuffer সেক)...")
-            viewModel.addAutomationLog("[Timer] Starting viewing countdown: ${totalDurationWithBuffer}s (exact duration + 1s buffer)")
+            viewModel.setAutomationState(AutomationState.OPEN_VIDEO)
+            viewModel.setAutoWorkStatus("ইউটিউব ভিডিও ওপেন করা হচ্ছে...")
+            viewModel.addAutomationLog("[Task] Step 4: Opening verified YouTube video")
 
-            // Allow video player / page to load
+            // Step 4 Verification: Verify YouTube page & video loaded
+            viewModel.setAutomationState(AutomationState.VERIFY_VIDEO)
             delay(1000L)
 
-            // Step 2: Active Video Watching & Background Countdown Loop in Tab 2
+            // Step 5: Exact Second Counting dynamically based on current task's duration
+            var taskDuration = (autoWorkTaskStartedSignal?.takeIf { it > 0 } ?: realInterstitialDurationSignal?.takeIf { it > 0 } ?: uiState.videoTabDuration.takeIf { it > 0 } ?: 15).coerceAtLeast(5)
+            var totalDurationWithBuffer = taskDuration + 1 // +1 second buffer
+
+            viewModel.setAutomationState(AutomationState.START_EXACT_TIMER)
+            viewModel.setAutoWorkStatus("ভিডিও দেখা হচ্ছে ($totalDurationWithBuffer সেক)...")
+            viewModel.addAutomationLog("[Timer] Step 5: Starting exact dynamic timer: ${totalDurationWithBuffer}s")
+
+            // Step 6: Active Video Watching & Background Countdown Loop
             var remainingSec = totalDurationWithBuffer
             taskCompletedSignal = false
             confirmClickedSignal = false
@@ -683,7 +688,7 @@ fun AvisoBrowserScreen(
                         delay(500L)
                     }
                     if (!uiState.isAutoWorkRunning) break
-                    viewModel.setAutomationState(AutomationState.VIEWING)
+                    viewModel.setAutomationState(AutomationState.START_EXACT_TIMER)
                 }
 
                 // Update countdown display in UI for both Auto Work and Video Tab
@@ -712,51 +717,52 @@ fun AvisoBrowserScreen(
             viewModel.updateAutoWorkCountdown(0, totalDurationWithBuffer)
             viewModel.updateVideoTabCountdown(0, totalDurationWithBuffer)
 
-            // Step 3: Video viewing time completed! Bring app to front
-            viewModel.setAutomationState(AutomationState.DURATION_COMPLETED)
-            viewModel.addAutomationLog("[Timer] Required viewing duration completed. Returning to task page.")
+            // Step 6 & 7: Timer Completion & Return to the SAME task
+            viewModel.setAutomationState(AutomationState.VIEW_TIME_COMPLETED)
+            viewModel.addAutomationLog("[Timer] Step 6: Exact viewing duration complete.")
             bringAppToFront(context)
             AvisoNotificationHelper.sendAutoWorkFinishedNotification(context)
 
-            // Return to original Aviso tab (Tab 1) and close Tab 2
-            viewModel.setAutomationState(AutomationState.RETURNING_TO_TASK_PAGE)
+            // Step 7: Return to the SAME Task & Verify Task ID
+            viewModel.setAutomationState(AutomationState.RETURN_TO_SAME_TASK)
             if (uiState.isVideoTabOpen) {
-                viewModel.setAutoWorkStatus("ভিডিও দেখা শেষ! আগের ট্যাবে ফিরে যাওয়া হচ্ছে...")
+                viewModel.setAutoWorkStatus("ভিডিও দেখা শেষ! মূল টাস্কে ফিরে যাওয়া হচ্ছে...")
                 viewModel.closeVideoTab()
                 viewModel.selectTab(0)
-                delay(1500L) // Allow Tab 1 to regain focus
+                delay(1500L)
             } else {
                 delay(1000L)
             }
 
-            // Step 4: Verify task page integrity before confirmation click
+            viewModel.setAutomationState(AutomationState.VERIFY_TASK_ID)
             val returnUrl = webViewRef?.url.orEmpty()
             if (!returnUrl.contains("tasks-youtube") && !returnUrl.contains("aviso.bz")) {
-                viewModel.reportWrongPage("RETURN_URL_MISMATCH", returnUrl)
-                viewModel.addAutomationLog("[Protection] Returned to unexpected page ($returnUrl). Recovering to tasks-youtube.")
+                viewModel.reportWrongPage("TASK_ID_MISMATCH", returnUrl)
+                viewModel.addAutomationLog("[Protection] Step 7: Returned to unexpected page ($returnUrl). Task ID mismatch. Recovering.")
                 webViewRef?.loadUrl("https://aviso.bz/tasks-youtube")
                 delay(3000L)
                 viewModel.reportSafeRecovery()
             }
 
-            // Step 5: Locate, Mark / Highlight Confirm View and Click Immediately
-            viewModel.setAutomationState(AutomationState.CONFIRMATION_PENDING)
-            viewModel.setAutoWorkStatus("Confirm view মার্ক ও ক্লিক করা হচ্ছে...")
-            viewModel.addAutomationLog("[Task] Marking Confirm View control and executing instant click.")
+            // Step 8: Confirm View Remains PENDING for user
+            viewModel.setAutomationState(AutomationState.CONFIRM_VIEW_PENDING)
+            viewModel.setAutoWorkStatus("কনফার্ম ভিউ পেন্ডিং (User interaction required)")
+            viewModel.addAutomationLog("[Task] Step 8: Highlighted Confirm View button. Left pending for user.")
             webViewRef?.evaluateJavascript(AvisoTaskParser.JS_HIGHLIGHT_CONFIRM_BUTTON, null)
-            delay(300L)
-            webViewRef?.evaluateJavascript(AvisoTaskParser.JS_AUTO_WORK_CLICK_CONFIRM, null)
-            delay(1200L)
+            delay(1500L)
 
-            // Second pass to ensure any remaining confirm button is clicked
-            webViewRef?.evaluateJavascript(AvisoTaskParser.JS_AUTO_WORK_CLICK_CONFIRM, null)
-            delay(1000L)
-
-            viewModel.incrementSuccessCount()
-            viewModel.setAutoWorkStatus("টাস্ক সফলভাবে সম্পন্ন ও কনফার্ম হয়েছে ✓ পেজ রিফ্রেশ হচ্ছে...")
-            viewModel.addAutomationLog("[Task] Task confirmed & rewarded. Refreshing task list.")
+            // Step 9: Refresh only after current task is complete to scan fresh task list
+            viewModel.setAutomationState(AutomationState.REFRESH_ONCE)
+            viewModel.setAutoWorkStatus("পেজ রিফ্রেশ করে নতুন টাস্ক তালিকা আপডেট করা হচ্ছে...")
+            viewModel.addAutomationLog("[Task] Step 9: Refreshing page to fetch updated task list.")
             webViewRef?.loadUrl("https://aviso.bz/tasks-youtube")
-            delay(3000L)
+            delay(3500L)
+
+            // Step 10: Scan fresh task list and repeat
+            viewModel.setAutomationState(AutomationState.SCAN_FRESH_TASK_LIST)
+            delay(1000L)
+            viewModel.setAutomationState(AutomationState.NEXT_TASK)
+            viewModel.addAutomationLog("[Task] Step 10: Ready for next task in sequence.")
         }
     }
 

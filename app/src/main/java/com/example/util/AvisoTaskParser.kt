@@ -1642,7 +1642,7 @@ object AvisoTaskParser {
                 var highlightTarget = btn || targetCell || targetRow;
 
                 if (highlightTarget) {
-                    try { highlightTarget.scrollIntoView({ behavior: 'instant', block: 'center' }); } catch(e) {}
+                    try { highlightTarget.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch(e) {}
                     
                     highlightTarget.style.outline = '4px solid #22c55e';
                     highlightTarget.style.boxShadow = '0 0 25px rgba(34, 197, 94, 0.9)';
@@ -1656,29 +1656,11 @@ object AvisoTaskParser {
                         targetRow.style.borderLeft = '6px solid #22c55e';
                     }
 
-                    // Also immediately execute click on the target element
+                    // Leave pending for user interaction
                     try {
-                        if (typeof highlightTarget.onclick === 'function') {
-                            highlightTarget.onclick.call(highlightTarget, { target: highlightTarget, currentTarget: highlightTarget, preventDefault: function(){}, stopPropagation: function(){} });
+                        if (window.AvisoBridge && window.AvisoBridge.onConfirmViewPending) {
+                            window.AvisoBridge.onConfirmViewPending(window._avisoLastTaskId || '', window._avisoLastExtractedSec || 15);
                         }
-                    } catch(e) {}
-                    try {
-                        var oc = highlightTarget.getAttribute ? highlightTarget.getAttribute('onclick') : null;
-                        if (oc) {
-                            window.eval(oc.replace(/^javascript:/i, '').replace(/;\s*return\s+false\s*;?/i, ''));
-                        }
-                    } catch(e) {}
-                    try { highlightTarget.click(); } catch(e) {}
-                    try {
-                        var r = highlightTarget.getBoundingClientRect();
-                        var cx = (r.left + r.width / 2) || 100;
-                        var cy = (r.top + r.height / 2) || 100;
-                        var opts = { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy };
-                        highlightTarget.dispatchEvent(new PointerEvent('pointerdown', opts));
-                        highlightTarget.dispatchEvent(new MouseEvent('mousedown', opts));
-                        highlightTarget.dispatchEvent(new PointerEvent('pointerup', opts));
-                        highlightTarget.dispatchEvent(new MouseEvent('mouseup', opts));
-                        highlightTarget.dispatchEvent(new MouseEvent('click', opts));
                     } catch(e) {}
                 }
             } catch(e) {}
