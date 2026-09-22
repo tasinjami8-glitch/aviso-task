@@ -215,12 +215,20 @@ object AvisoTaskParser {
 
                 function extractDur(el) {
                     try {
-                        var row = el ? (el.closest ? (el.closest('tr') || el.closest('.work-serf') || el.closest('.task-item') || el.closest('div')) : null) : null;
-                        var txt = (row ? row.innerText : '') || (document.body ? document.body.innerText : '') || '';
-                        var mS = txt.match(/(\d+)\s*(?:сек|sec|секунд)/i);
-                        if (mS) return parseInt(mS[1], 10) || 20;
-                        var mM = txt.match(/(\d+)\s*(?:min|минут)/i);
-                        if (mM) return (parseInt(mM[1], 10) || 1) * 60;
+                        var row = el ? (el.closest ? (el.closest('tr') || el.closest('.work-serf') || el.closest('.task-item') || el.closest('[id^="adv_"]') || el.closest('[id^="task_"]') || el.closest('div')) : null) : null;
+                        if (row) {
+                            // Look at right-side columns, badges, or spans first
+                            var rightCol = row.querySelector('td:last-child, td:nth-child(3), td:nth-child(4), span.badge, span.time, .task-time, .work-time, [class*="time"], [class*="sec"]');
+                            if (rightCol) {
+                                var rmS = (rightCol.innerText || rightCol.textContent || '').match(/(\d+)\s*(?:сек|sec|секунд|s\b)/i);
+                                if (rmS) return parseInt(rmS[1], 10) || 20;
+                            }
+                            var txt = (row ? (row.innerText || row.textContent) : '') || '';
+                            var mS = txt.match(/(\d+)\s*(?:сек|sec|секунд|s\b)/i);
+                            if (mS) return parseInt(mS[1], 10) || 20;
+                            var mM = txt.match(/(\d+)\s*(?:min|минут|m\b)/i);
+                            if (mM) return (parseInt(mM[1], 10) || 1) * 60;
+                        }
                     } catch(e) {}
                     return 20;
                 }
@@ -232,6 +240,19 @@ object AvisoTaskParser {
                     var aTag = (el.tagName === 'A') ? el : (el.closest ? el.closest('a') : null);
                     var href = (aTag ? aTag.getAttribute('href') : null) || el.getAttribute('href');
                     var dur = extractDur(el);
+
+                    // Track clicked task element, row, and exact coordinates
+                    var parentRow = el.closest ? (el.closest('tr') || el.closest('.work-serf') || el.closest('.task-item') || el.closest('[id^="adv_"]') || el.closest('[id^="task_"]')) : null;
+                    if (parentRow) {
+                        window._avisoLastTaskRow = parentRow;
+                        window._avisoLastTaskId = parentRow.id || parentRow.getAttribute('id') || parentRow.getAttribute('data-task-id') || parentRow.getAttribute('data-id') || '';
+                        window._avisoLastTaskLink = el;
+                    }
+
+                    try {
+                        var r = el.getBoundingClientRect();
+                        window._avisoLastClickCoords = { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+                    } catch(e) {}
 
                     try { el.focus(); } catch(e) {}
                     
@@ -1019,11 +1040,13 @@ object AvisoTaskParser {
                 var clicked = false;
                 var docs = getAllDocs();
 
-                // 1. First check inside the saved active task row if present on tasks-youtube!
-                if (window._avisoLastTaskRow && document.body.contains(window._avisoLastTaskRow)) {
-                    var row = window._avisoLastTaskRow;
-                    try { row.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch(e) {}
-                    var rowCandidates = row.querySelectorAll('button, a, input, span, div, p, strong, b, [role="button"]');
+                // 1. First check inside the saved active task row / container where the link was clicked!
+                var targetRow = (window._avisoLastTaskRow && document.body.contains(window._avisoLastTaskRow)) ? window._avisoLastTaskRow : 
+                                (window._avisoLastTaskId ? document.getElementById(window._avisoLastTaskId) : null);
+                
+                if (targetRow) {
+                    try { targetRow.scrollIntoView({ behavior: 'instant', block: 'center' }); } catch(e) {}
+                    var rowCandidates = targetRow.querySelectorAll('button, a, input, span, div, p, strong, b, [role="button"]');
                     for (var r = 0; r < rowCandidates.length; r++) {
                         if (isConfirmBtn(rowCandidates[r])) {
                             safeClick(rowCandidates[r]);
@@ -1031,6 +1054,45 @@ object AvisoTaskParser {
                             break;
                         }
                     }
+                    // If no explicit confirm button matched by keyword, check if any newly appeared button/action replaced the link in this row
+                    if (!clicked) {
+                        for (var r2 = 0; r2 < rowCandidates.length; r2++) {
+                            var rEl = rowCandidates[r2];
+                            var rTxt = (rEl.innerText || rEl.value || '').trim().toLowerCase();
+                            var rCls = (rEl.className || '').toString().toLowerCase();
+                            if (rCls.indexOf('btn') !== -1 || rTxt.indexOf('просмотр') !== -1 || rTxt.indexOf('подтверд') !== -1 || rTxt.indexOf('провер') !== -1) {
+                                safeClick(rEl);
+                                clicked = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                // Check parent element or exact coordinate of the original clicked link
+                if (!clicked && window._avisoLastTaskLink && window._avisoLastTaskLink.parentElement && document.body.contains(window._avisoLastTaskLink.parentElement)) {
+                    var parentCandidates = window._avisoLastTaskLink.parentElement.querySelectorAll('button, a, input, span, div, [role="button"]');
+                    for (var p = 0; p < parentCandidates.length; p++) {
+                        if (isConfirmBtn(parentCandidates[p])) {
+                            safeClick(parentCandidates[p]);
+                            clicked = true;
+                            break;
+                        }
+                    }
+                }
+
+                // Check element at exact previous click coordinates
+                if (!clicked && window._avisoLastClickCoords && typeof document.elementFromPoint === 'function') {
+                    try {
+                        var elAtPoint = document.elementFromPoint(window._avisoLastClickCoords.x, window._avisoLastClickCoords.y);
+                        if (elAtPoint && elAtPoint !== document.body && elAtPoint !== document.documentElement) {
+                            var clickableAtPoint = (elAtPoint.tagName === 'A' || elAtPoint.tagName === 'BUTTON' || elAtPoint.getAttribute('role') === 'button' || (elAtPoint.className || '').indexOf('btn') !== -1) ? elAtPoint : (elAtPoint.closest ? elAtPoint.closest('a, button, [role="button"], [class*="btn"]') : null);
+                            if (clickableAtPoint) {
+                                safeClick(clickableAtPoint);
+                                clicked = true;
+                            }
+                        }
+                    } catch(e) {}
                 }
 
                 // 2. Global search across all documents, frames, and sub-elements

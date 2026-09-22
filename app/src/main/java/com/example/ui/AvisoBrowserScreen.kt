@@ -460,7 +460,7 @@ fun AvisoBrowserScreen(
             return@LaunchedEffect
         }
         val taskSec = if (uiState.videoTabDuration > 0) uiState.videoTabDuration else 20
-        var totalSec = taskSec + 2 // +2 seconds extra buffer
+        var totalSec = taskSec + 1 // +1 second extra wait buffer as requested
         var remaining = totalSec
         viewModel.updateVideoTabCountdown(remaining, totalSec)
 
@@ -522,9 +522,13 @@ fun AvisoBrowserScreen(
 
             Toast.makeText(context, "🎬 ভিডিও দেখা সম্পন্ন ও কনফার্ম করা হয়েছে ✓", Toast.LENGTH_SHORT).show()
 
-            // Step 4: Wait 2.5 seconds so reward is registered and refresh task list
-            delay(2500L)
-            webViewRef?.evaluateJavascript(AvisoTaskParser.JS_READER_CODE, null)
+            // Step 4: Wait 1.8 seconds so reward is registered and automatically refresh the page
+            delay(1800L)
+            if (webViewRef?.url?.contains("tasks-youtube") == true) {
+                webViewRef?.reload()
+            } else {
+                webViewRef?.loadUrl("https://aviso.bz/tasks-youtube")
+            }
         }
     }
 
@@ -636,7 +640,7 @@ fun AvisoBrowserScreen(
             }
 
             var taskDuration = (uiState.videoTabDuration.takeIf { it > 0 } ?: realInterstitialDurationSignal ?: autoWorkTaskStartedSignal ?: 15).coerceAtLeast(5)
-            var totalDurationWithBuffer = taskDuration + 2 // +2 seconds extra wait buffer as requested
+            var totalDurationWithBuffer = taskDuration + 1 // +1 second extra wait buffer as requested
             viewModel.setAutoWorkStatus("ভিডিও দেখা হচ্ছে ($totalDurationWithBuffer সেক)...")
 
             // Allow video player / page to load
@@ -656,7 +660,7 @@ fun AvisoBrowserScreen(
                         val diff = newDur - taskDuration
                         remainingSec += diff
                         taskDuration = newDur
-                        totalDurationWithBuffer = newDur + 2
+                        totalDurationWithBuffer = newDur + 1
                     }
                 }
 
@@ -742,23 +746,19 @@ fun AvisoBrowserScreen(
                 viewModel.setAutoWorkStatus("টাস্ক কনফার্ম করা যায়নি (ব্যর্থ) ✗")
             }
 
-            // Step 5: Wait for reward confirmation to settle and navigate back if necessary
-            delay(2500L)
-            if (webViewRef?.url?.contains("tasks-youtube") != true) {
-                viewModel.setAutoWorkStatus("তালিকায় ফিরে যাওয়া হচ্ছে...")
-                if (webViewRef?.canGoBack() == true) {
-                    webViewRef?.goBack()
-                    delay(2000L)
-                } else {
-                    webViewRef?.loadUrl("https://aviso.bz/tasks-youtube")
-                    delay(2500L)
-                }
+            // Step 5: Wait 1.8 seconds for reward confirmation to settle and automatically reload/refresh the page
+            delay(1800L)
+            viewModel.setAutoWorkStatus("টাস্ক সম্পন্ন হয়েছে! পেজ রিফ্রেশ করা হচ্ছে...")
+            if (webViewRef?.url?.contains("tasks-youtube") == true) {
+                webViewRef?.reload()
+                delay(3000L)
+            } else {
+                webViewRef?.loadUrl("https://aviso.bz/tasks-youtube")
+                delay(3000L)
             }
 
-            // Refresh tasks on Tab 1
-            webViewRef?.evaluateJavascript(AvisoTaskParser.JS_READER_CODE, null)
-            viewModel.setAutoWorkStatus("কাজ সম্পন্ন হয়েছে! পরবর্তী কাজে যাওয়া হচ্ছে...")
-            delay(1500L)
+            viewModel.setAutoWorkStatus("পরবর্তী কাজে যাওয়া হচ্ছে...")
+            delay(1000L)
         }
     }
 
