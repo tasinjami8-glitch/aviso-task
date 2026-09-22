@@ -3,6 +3,8 @@ package com.example.viewmodel
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.model.ActiveTaskContext
+import com.example.model.AutomationState
 import com.example.model.BrowserTab
 import com.example.model.TaskScanResult
 import com.example.service.AvisoTaskMonitorService
@@ -14,6 +16,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 data class AvisoUiState(
     val currentUrl: String = "https://aviso.bz/tasks-youtube",
@@ -33,6 +38,12 @@ data class AvisoUiState(
     val reloadTrigger: Long = 0L,
     val lastKnownTasksCount: Int = 0,
     val isAutoWorkRunning: Boolean = false,
+    val isAutoWorkPaused: Boolean = false,
+    val automationState: AutomationState = AutomationState.IDLE,
+    val currentTaskContext: ActiveTaskContext? = null,
+    val totalQueuedTasksCount: Int = 0,
+    val currentTaskIndex: Int = 0,
+    val automationLogs: List<String> = emptyList(),
     val autoWorkCountdownSeconds: Int = 0,
     val autoWorkTotalSeconds: Int = 0,
     val autoWorkStatus: String = "",
@@ -216,9 +227,12 @@ class AvisoViewModel : ViewModel() {
     }
 
     fun startAutoWork() {
+        addAutomationLog("[Task] Automation session started")
         _uiState.update {
             it.copy(
                 isAutoWorkRunning = true,
+                isAutoWorkPaused = false,
+                automationState = AutomationState.TASK_DISCOVERED,
                 autoWorkCountdownSeconds = 0,
                 autoWorkTotalSeconds = 0,
                 autoWorkStatus = "অটো কাজ শুরু হচ্ছে...",
@@ -228,15 +242,63 @@ class AvisoViewModel : ViewModel() {
         }
     }
 
+    fun pauseAutoWork() {
+        addAutomationLog("[Task] Automation paused by user")
+        _uiState.update {
+            it.copy(
+                isAutoWorkPaused = true,
+                automationState = AutomationState.PAUSED,
+                autoWorkStatus = "অটো কাজ সাময়িক বিরতি (Paused)"
+            )
+        }
+    }
+
+    fun resumeAutoWork() {
+        addAutomationLog("[Task] Automation resumed by user")
+        _uiState.update {
+            it.copy(
+                isAutoWorkPaused = false,
+                automationState = if (it.currentTaskContext != null) AutomationState.VIEWING else AutomationState.TASK_DISCOVERED,
+                autoWorkStatus = "অটো কাজ পুনরায় চালু হচ্ছে..."
+            )
+        }
+    }
+
     fun stopAutoWork(reason: String = "") {
+        addAutomationLog("[Task] Automation stopped: ${reason.ifEmpty { "Manual stop" }}")
         _uiState.update {
             it.copy(
                 isAutoWorkRunning = false,
+                isAutoWorkPaused = false,
+                automationState = AutomationState.STOPPED,
+                currentTaskContext = null,
                 autoWorkCountdownSeconds = 0,
                 autoWorkTotalSeconds = 0,
                 autoWorkStatus = if (reason.isNotEmpty()) reason else "অটো কাজ বন্ধ"
             )
         }
+    }
+
+    fun setAutomationState(state: AutomationState) {
+        _uiState.update { it.copy(automationState = state) }
+    }
+
+    fun setActiveTaskContext(context: ActiveTaskContext?) {
+        _uiState.update { it.copy(currentTaskContext = context) }
+    }
+
+    fun addAutomationLog(message: String) {
+        val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+        val timestamp = timeFormat.format(Date())
+        val entry = "[$timestamp] $message"
+        _uiState.update { current ->
+            val updated = (listOf(entry) + current.automationLogs).take(200)
+            current.copy(automationLogs = updated)
+        }
+    }
+
+    fun clearAutomationLogs() {
+        _uiState.update { it.copy(automationLogs = emptyList()) }
     }
 
     fun updateAutoWorkCountdown(remainingSec: Int, totalSec: Int) {

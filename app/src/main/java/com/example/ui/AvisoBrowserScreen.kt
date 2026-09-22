@@ -67,7 +67,9 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.ListAlt
 import androidx.compose.material.icons.filled.MenuOpen
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Refresh
@@ -89,8 +91,10 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import com.example.model.AutomationState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -203,8 +207,14 @@ class AvisoBridge(
     private val onTaskCompleted: () -> Unit = {},
     private val onInterstitialHandled: (Int) -> Unit = {},
     private val onOpenYouTube: (String) -> Unit = {},
-    private val onOpenNewTab: (String, Int) -> Unit = { _, _ -> }
+    private val onOpenNewTab: (String, Int) -> Unit = { _, _ -> },
+    private val onAutomationLog: (String) -> Unit = {}
 ) {
+    @JavascriptInterface
+    fun onAutomationLog(message: String) {
+        onAutomationLog.invoke(message)
+    }
+
     @JavascriptInterface
     fun onTasksScanned(json: String) {
         onResult(json)
@@ -383,18 +393,6 @@ fun AvisoBrowserScreen(
         }
     }
 
-    // Fast Continuous Auto-Confirm Scanner Loop (runs across main & video tabs)
-    // Automatically detects and clicks any Confirm / Verify / Подтвердить button on the page in Russian or English
-    LaunchedEffect(Unit) {
-        while (isActive) {
-            delay(800L)
-            webViewRef?.evaluateJavascript(AvisoTaskParser.JS_AUTO_WORK_CLICK_CONFIRM, null)
-            if (uiState.isVideoTabOpen) {
-                secondaryWebViewRef?.evaluateJavascript(AvisoTaskParser.JS_AUTO_WORK_CLICK_CONFIRM, null)
-            }
-        }
-    }
-
     var autoWorkTaskStartedSignal by remember { mutableStateOf<Int?>(null) }
     var autoWorkNoTasksSignal by remember { mutableStateOf(false) }
     var realTimerSecondsSignal by remember { mutableStateOf(-1) }
@@ -407,6 +405,7 @@ fun AvisoBrowserScreen(
     var showOverlayPromptDialog by remember { mutableStateOf(false) }
     var didDismissOverlayPrompt by remember { mutableStateOf(false) }
     var showTabsOverviewDialog by remember { mutableStateOf(false) }
+    var showLogsDialog by remember { mutableStateOf(false) }
 
     var fileUploadCallback by remember { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
     val fileChooserLauncher = rememberLauncherForActivityResult(
@@ -510,10 +509,11 @@ fun AvisoBrowserScreen(
         }
     }
 
-    // Auto Work Execution Engine
+    // Auto Work Execution Engine (Strict Task-Only Automation with Manual Pending Confirmation)
     LaunchedEffect(uiState.isAutoWorkRunning) {
         if (!uiState.isAutoWorkRunning) {
             AvisoNotificationHelper.cancelAutoWorkProgressNotification(context)
+            viewModel.setAutomationState(AutomationState.IDLE)
             return@LaunchedEffect
         }
 
@@ -525,12 +525,20 @@ fun AvisoBrowserScreen(
         }
 
         if (webViewRef?.url?.contains("tasks-youtube") != true) {
+            viewModel.setAutomationState(AutomationState.TASK_DISCOVERED)
             viewModel.setAutoWorkStatus("ইউটিউব টাস্ক পেজে যাওয়া হচ্ছে...")
+            viewModel.addAutomationLog("[Browser] Navigating to https://aviso.bz/tasks-youtube")
             webViewRef?.loadUrl("https://aviso.bz/tasks-youtube")
             delay(3500L)
         }
 
         while (isActive && uiState.isAutoWorkRunning) {
+            // Handle Paused state gracefully
+            while (isActive && uiState.isAutoWorkRunning && uiState.isAutoWorkPaused) {
+                delay(500L)
+            }
+            if (!uiState.isAutoWorkRunning) break
+
             autoWorkTaskStartedSignal = null
             autoWorkNoTasksSignal = false
             realTimerSecondsSignal = -1
@@ -538,8 +546,10 @@ fun AvisoBrowserScreen(
             confirmClickedSignal = false
             realInterstitialDurationSignal = null
 
-            // Step 1: Find next video task & click task link
-            viewModel.setAutoWorkStatus("ভিডিও কাজ খোঁজা ও শুরু করা হচ্ছে...")
+            // Step 1: Scan & Find next video task
+            viewModel.setAutomationState(AutomationState.TASK_DISCOVERED)
+            viewModel.setAutoWorkStatus("টাস্ক তালিকা স্ক্যান ও ভিডিও কাজ লক করা হচ্ছে...")
+            viewModel.addAutomationLog("[Task] Scanning task table for next valid YouTube task")
             webViewRef?.evaluateJavascript(AvisoTaskParser.JS_AUTO_WORK_FIND_AND_CLICK, null)
 
             // Wait for task detection & initiation (up to 5 seconds)
@@ -560,11 +570,14 @@ fun AvisoBrowserScreen(
                 if (!didReloadForTasks) {
                     didReloadForTasks = true
                     viewModel.setAutoWorkStatus("নতুন কাজ চেক করতে পেজ রিফ্রেশ হচ্ছে...")
+                    viewModel.addAutomationLog("[Task] No immediate tasks, reloading tasks-youtube")
                     webViewRef?.loadUrl("https://aviso.bz/tasks-youtube")
                     delay(3500L)
                     continue
                 } else {
+                    viewModel.setAutomationState(AutomationState.TASK_LIST_EXHAUSTED)
                     viewModel.setAutoWorkStatus("বর্তমানে কোনো কাজ নেই!")
+                    viewModel.addAutomationLog("[Task] All available tasks completed / list exhausted")
                     AvisoNotificationHelper.sendNoTasksNotification(context, wasCompleted = true)
                     viewModel.stopAutoWork("সব কাজ শেষ হয়েছে!")
                     Toast.makeText(context, "সবগুলো YouTube কাজ সম্পন্ন হয়েছে!", Toast.LENGTH_LONG).show()
@@ -588,7 +601,8 @@ fun AvisoBrowserScreen(
                     (realTimerSecondsSignal > 0)
 
             if (!isStarted) {
-                viewModel.setAutoWorkStatus("কাজ শুরু হয়নি, পুনরায় চেষ্টা করা হচ্ছে...")
+                viewModel.setAutoWorkStatus("কাজ শুরু হয়নি, পুনরায় টাস্ক কন্টেইনার যাচাই করা হচ্ছে...")
+                viewModel.addAutomationLog("[Task] Retrying task lock & initiation within row container")
                 webViewRef?.evaluateJavascript(AvisoTaskParser.JS_AUTO_WORK_FIND_AND_CLICK, null)
                 delay(2500L)
                 val retryUrl = webViewRef?.url.orEmpty()
@@ -600,6 +614,7 @@ fun AvisoBrowserScreen(
                 if (autoWorkTaskStartedSignal == null && !retryNav && !uiState.isVideoTabOpen) {
                     viewModel.incrementFailedCount()
                     viewModel.setAutoWorkStatus("টাস্ক শুরু ব্যর্থ হয়েছে (ব্যর্থ: ${uiState.failedTasksCount + 1})")
+                    viewModel.addAutomationLog("[Task] Task lock failed. Refreshing safely to recover.")
                     webViewRef?.reload()
                     delay(3000L)
                     continue
@@ -608,7 +623,10 @@ fun AvisoBrowserScreen(
 
             var taskDuration = (autoWorkTaskStartedSignal?.takeIf { it > 0 } ?: realInterstitialDurationSignal?.takeIf { it > 0 } ?: uiState.videoTabDuration.takeIf { it > 0 } ?: 15).coerceAtLeast(5)
             var totalDurationWithBuffer = taskDuration + 1 // +1 second extra wait buffer as requested
+
+            viewModel.setAutomationState(AutomationState.VIEWING)
             viewModel.setAutoWorkStatus("ভিডিও দেখা হচ্ছে ($totalDurationWithBuffer সেক)...")
+            viewModel.addAutomationLog("[Timer] Starting viewing countdown: ${totalDurationWithBuffer}s (exact duration + 1s buffer)")
 
             // Allow video player / page to load
             delay(1000L)
@@ -619,12 +637,33 @@ fun AvisoBrowserScreen(
             confirmClickedSignal = false
 
             while (uiState.isAutoWorkRunning && remainingSec > 0) {
+                // Pause support during viewing
+                if (uiState.isAutoWorkPaused) {
+                    viewModel.setAutomationState(AutomationState.PAUSED)
+                    AvisoNotificationHelper.showAutoWorkProgressNotification(
+                        context,
+                        remainingSec,
+                        totalDurationWithBuffer,
+                        isPaused = true
+                    )
+                    while (uiState.isAutoWorkPaused && uiState.isAutoWorkRunning) {
+                        delay(500L)
+                    }
+                    if (!uiState.isAutoWorkRunning) break
+                    viewModel.setAutomationState(AutomationState.VIEWING)
+                }
+
                 // Update countdown display in UI for both Auto Work and Video Tab
                 viewModel.updateAutoWorkCountdown(remainingSec, totalDurationWithBuffer)
                 viewModel.updateVideoTabCountdown(remainingSec, totalDurationWithBuffer)
 
                 // Show live background notification in Android status bar
-                AvisoNotificationHelper.showAutoWorkProgressNotification(context, remainingSec, totalDurationWithBuffer)
+                AvisoNotificationHelper.showAutoWorkProgressNotification(
+                    context,
+                    remainingSec,
+                    totalDurationWithBuffer,
+                    isPaused = false
+                )
 
                 // Continuously keep video playing
                 secondaryWebViewRef?.evaluateJavascript(AvisoTaskParser.JS_START_AND_WATCH_VIDEO, null)
@@ -641,10 +680,13 @@ fun AvisoBrowserScreen(
             viewModel.updateVideoTabCountdown(0, totalDurationWithBuffer)
 
             // Step 3: Video viewing time completed! Bring app to front
+            viewModel.setAutomationState(AutomationState.DURATION_COMPLETED)
+            viewModel.addAutomationLog("[Timer] Required viewing duration completed. Returning to task page.")
             bringAppToFront(context)
             AvisoNotificationHelper.sendAutoWorkFinishedNotification(context)
 
             // Return to original Aviso tab (Tab 1) and close Tab 2
+            viewModel.setAutomationState(AutomationState.RETURNING_TO_TASK_PAGE)
             if (uiState.isVideoTabOpen) {
                 viewModel.setAutoWorkStatus("ভিডিও দেখা শেষ! আগের ট্যাবে ফিরে যাওয়া হচ্ছে...")
                 viewModel.closeVideoTab()
@@ -655,17 +697,19 @@ fun AvisoBrowserScreen(
             }
 
             // Step 4: Locate and highlight the Confirm View control on the exact task row (Manual Pending Confirmation)
-            viewModel.setAutoWorkStatus("ভিডিও দেখা সম্পন্ন — কনফার্মেশন অপেক্ষমান (Confirmation Pending) | Confirm view ক্লিক করুন")
+            viewModel.setAutomationState(AutomationState.CONFIRMATION_PENDING)
+            viewModel.setAutoWorkStatus("Viewing completed — confirmation pending | Click Confirm view")
+            viewModel.addAutomationLog("[Task] State: CONFIRMATION_PENDING. Highlighted Confirm View for manual user confirmation.")
             webViewRef?.evaluateJavascript(AvisoTaskParser.JS_HIGHLIGHT_CONFIRM_BUTTON, null)
             viewModel.incrementSuccessCount()
 
             Toast.makeText(context, "Viewing time completed. Click Confirm view for this task.", Toast.LENGTH_LONG).show()
 
             // Keep the task in a "Viewing completed — confirmation pending" state.
-            // Do NOT click Confirm view automatically.
-            // Do NOT reload or refresh away the pending confirm button.
+            // DO NOT click Confirm view automatically.
+            // DO NOT reload or refresh away the pending confirm button.
             // The task remains available with its confirmation control pending for manual confirmation by user.
-            delay(3000L)
+            delay(4000L)
             viewModel.setAutoWorkStatus("টাস্কের কনফার্মেশন অপেক্ষমান রাখা হয়েছে ✓")
         }
     }
@@ -780,7 +824,7 @@ fun AvisoBrowserScreen(
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
                                     text = if (uiState.isAutoWorkRunning) {
-                                        if (uiState.autoWorkCountdownSeconds > 0) "${uiState.autoWorkCountdownSeconds}s বাকি" else "চলছে..."
+                                        if (uiState.isAutoWorkPaused) "Paused" else if (uiState.autoWorkCountdownSeconds > 0) "${uiState.autoWorkCountdownSeconds}s" else "Running"
                                     } else {
                                         "Start Work"
                                     },
@@ -789,6 +833,58 @@ fun AvisoBrowserScreen(
                                     color = if (uiState.isAutoWorkRunning) Color(0xFFDC2626) else Color(0xFF047857)
                                 )
                             }
+                        }
+
+                        // Pause / Resume Button during Active Auto Work
+                        if (uiState.isAutoWorkRunning) {
+                            Spacer(modifier = Modifier.width(3.dp))
+                            Surface(
+                                shape = RoundedCornerShape(20.dp),
+                                color = if (uiState.isAutoWorkPaused) Color(0xFFFEF3C7) else MaterialTheme.colorScheme.surfaceVariant,
+                                border = BorderStroke(1.dp, if (uiState.isAutoWorkPaused) Color(0xFFD97706) else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)),
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .clickable {
+                                        if (uiState.isAutoWorkPaused) viewModel.resumeAutoWork() else viewModel.pauseAutoWork()
+                                    }
+                                    .testTag("topbar_pause_resume_button")
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = if (uiState.isAutoWorkPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
+                                        contentDescription = if (uiState.isAutoWorkPaused) "Resume" else "Pause",
+                                        tint = if (uiState.isAutoWorkPaused) Color(0xFFB45309) else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(3.dp))
+                                    Text(
+                                        text = if (uiState.isAutoWorkPaused) "Resume" else "Pause",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (uiState.isAutoWorkPaused) Color(0xFFB45309) else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.width(3.dp))
+
+                        // Automation Logs Button
+                        IconButton(
+                            onClick = { showLogsDialog = true },
+                            modifier = Modifier
+                                .size(34.dp)
+                                .testTag("topbar_logs_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ListAlt,
+                                contentDescription = "Automation Logs",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
                         }
 
                         Spacer(modifier = Modifier.width(4.dp))
@@ -1186,6 +1282,11 @@ fun AvisoBrowserScreen(
                                             }
                                             viewModel.openVideoTab(url, durationSec)
                                         }
+                                    },
+                                    onAutomationLog = { logMsg ->
+                                        post {
+                                            viewModel.addAutomationLog(logMsg)
+                                        }
                                     }
                                 ),
                                 "AvisoBridge"
@@ -1535,6 +1636,11 @@ fun AvisoBrowserScreen(
                                                         loadUrl(newUrl)
                                                     }
                                                 }
+                                            },
+                                            onAutomationLog = { logMsg ->
+                                                post {
+                                                    viewModel.addAutomationLog(logMsg)
+                                                }
                                             }
                                         ),
                                         "AvisoBridge"
@@ -1845,6 +1951,38 @@ fun AvisoBrowserScreen(
                                 }
 
                                 Spacer(modifier = Modifier.width(10.dp))
+
+                                // Pause / Resume Button in HUD
+                                Surface(
+                                    onClick = {
+                                        if (uiState.isAutoWorkPaused) viewModel.resumeAutoWork() else viewModel.pauseAutoWork()
+                                    },
+                                    shape = RoundedCornerShape(16.dp),
+                                    color = if (uiState.isAutoWorkPaused) Color(0xFFD97706) else MaterialTheme.colorScheme.secondaryContainer,
+                                    shadowElevation = 4.dp,
+                                    modifier = Modifier.testTag("hud_pause_resume_button")
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 10.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = if (uiState.isAutoWorkPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
+                                            contentDescription = if (uiState.isAutoWorkPaused) "Resume" else "Pause",
+                                            tint = if (uiState.isAutoWorkPaused) Color.White else MaterialTheme.colorScheme.onSecondaryContainer,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            text = if (uiState.isAutoWorkPaused) "Resume" else "Pause",
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (uiState.isAutoWorkPaused) Color.White else MaterialTheme.colorScheme.onSecondaryContainer,
+                                            fontSize = 12.sp
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.width(6.dp))
 
                                 // Stop Work Button
                                 Surface(
@@ -2247,6 +2385,116 @@ fun AvisoBrowserScreen(
                                 Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text("+ নতুন ট্যাব তৈরি করুন")
+                            }
+                        }
+                    },
+                    confirmButton = {}
+                )
+            }
+
+            // Realtime Automation Logs Dialog ([Task], [Browser], [Timer], [Protection])
+            if (showLogsDialog) {
+                AlertDialog(
+                    onDismissRequest = { showLogsDialog = false },
+                    title = {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.ListAlt,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Automation Logs (${uiState.automationLogs.size})",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            IconButton(
+                                onClick = { showLogsDialog = false },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Close,
+                                    contentDescription = "বন্ধ করুন",
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    },
+                    text = {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 420.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Current State: ${uiState.automationState.name}",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                TextButton(
+                                    onClick = { viewModel.clearAutomationLogs() },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                ) {
+                                    Text("Clear Logs", fontSize = 11.sp)
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(6.dp))
+
+                            if (uiState.automationLogs.isEmpty()) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(140.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "No logs recorded yet.\nStart Work to see structured live logs.",
+                                        color = MaterialTheme.colorScheme.outline,
+                                        fontSize = 12.sp,
+                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                    )
+                                }
+                            } else {
+                                LazyColumn(
+                                    modifier = Modifier
+                                        .weight(1f, fill = false)
+                                        .fillMaxWidth()
+                                        .background(Color(0xFF0F172A), shape = RoundedCornerShape(8.dp))
+                                        .padding(10.dp),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    items(uiState.automationLogs) { logLine ->
+                                        val textColor = when {
+                                            logLine.contains("[Protection]") -> Color(0xFFF87171)
+                                            logLine.contains("[Task]") -> Color(0xFF60A5FA)
+                                            logLine.contains("[Timer]") -> Color(0xFFFBBF24)
+                                            logLine.contains("[Browser]") -> Color(0xFF34D399)
+                                            else -> Color(0xFFE2E8F0)
+                                        }
+                                        Text(
+                                            text = logLine,
+                                            color = textColor,
+                                            fontSize = 11.sp,
+                                            lineHeight = 15.sp,
+                                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                                        )
+                                    }
+                                }
                             }
                         }
                     },

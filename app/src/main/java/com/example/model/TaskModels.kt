@@ -1,5 +1,34 @@
 package com.example.model
 
+enum class AutomationState {
+    IDLE,
+    TASK_DISCOVERED,
+    TASK_VALIDATED,
+    ACTIVE_TASK_LOCKED,
+    VIDEO_OPENING,
+    VIDEO_READY,
+    VIEWING,
+    DURATION_COMPLETED,
+    RETURNING_TO_TASK_PAGE,
+    TASK_VERIFIED,
+    CONFIRMATION_PENDING,
+    NEXT_TASK,
+    TASK_LIST_EXHAUSTED,
+    PAUSED,
+    STOPPED,
+    RECOVERY_REQUIRED
+}
+
+data class ActiveTaskContext(
+    val taskId: String = "",
+    val taskTitle: String = "",
+    val durationSec: Int = 15,
+    val videoUrl: String = "",
+    val originalPageUrl: String = "https://aviso.bz/tasks-youtube",
+    val cellIndex: Int = -1,
+    val isLocked: Boolean = true
+)
+
 data class TaskInfo(
     val id: String,
     val title: String,
