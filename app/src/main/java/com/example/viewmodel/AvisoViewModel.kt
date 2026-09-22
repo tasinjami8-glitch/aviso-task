@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.model.ActiveTaskContext
 import com.example.model.AutomationState
 import com.example.model.BrowserTab
+import com.example.model.CurrentTaskSession
 import com.example.model.TaskScanResult
 import com.example.service.AvisoTaskMonitorService
 import com.example.util.AvisoNotificationHelper
@@ -41,6 +42,7 @@ data class AvisoUiState(
     val isAutoWorkPaused: Boolean = false,
     val automationState: AutomationState = AutomationState.IDLE,
     val currentTaskContext: ActiveTaskContext? = null,
+    val currentTaskSession: CurrentTaskSession? = null,
     val totalQueuedTasksCount: Int = 0,
     val currentTaskIndex: Int = 0,
     val automationLogs: List<String> = emptyList(),
@@ -264,6 +266,85 @@ class AvisoViewModel : ViewModel() {
         }
     }
 
+    fun setCurrentTaskSession(
+        taskId: String,
+        taskTitle: String = "",
+        durationSec: Int = 15,
+        containerId: String = "",
+        savedTaskPageUrl: String = "https://aviso.bz/tasks-youtube"
+    ) {
+        val session = CurrentTaskSession(
+            taskId = taskId,
+            taskTitle = taskTitle,
+            durationSec = durationSec,
+            savedTaskPageUrl = savedTaskPageUrl,
+            containerId = containerId,
+            isLocked = true
+        )
+        setCurrentTaskSession(session)
+    }
+
+    fun setCurrentTaskSession(session: CurrentTaskSession?) {
+        _uiState.update {
+            it.copy(
+                currentTaskSession = session,
+                currentTaskContext = session?.let { s ->
+                    ActiveTaskContext(
+                        taskId = s.taskId,
+                        taskTitle = s.taskTitle,
+                        durationSec = s.durationSec,
+                        videoUrl = s.videoUrl,
+                        originalPageUrl = s.savedTaskPageUrl,
+                        savedTaskPageUrl = s.savedTaskPageUrl,
+                        cellIndex = s.cellIndex,
+                        containerId = s.containerId,
+                        isLocked = s.isLocked
+                    )
+                }
+            )
+        }
+    }
+
+    fun reportWrongPage(reason: String, url: String) {
+        addAutomationLog("[Protection] WRONG_PAGE_DETECTED: $reason (URL: $url). All clicks stopped immediately.")
+        _uiState.update {
+            it.copy(
+                automationState = AutomationState.WRONG_PAGE_DETECTED,
+                autoWorkStatus = "ভুল পেজ সনাক্ত! নিরাপদ রিকভারি চলছে..."
+            )
+        }
+    }
+
+    fun reportTaskMismatch(expectedId: String, foundId: String) {
+        addAutomationLog("[Protection] TASK_MISMATCH: Expected Task ID = '$expectedId', Found Task ID = '$foundId'. Stopping clicks safely.")
+        _uiState.update {
+            it.copy(
+                automationState = AutomationState.TASK_MISMATCH,
+                autoWorkStatus = "টাস্ক মিসম্যাচ সনাক্ত! অটোমেশন নিরাপদভাবে স্থগিত করা হয়েছে।"
+            )
+        }
+    }
+
+    fun reportSafeRecovery(restoredUrl: String = "https://aviso.bz/tasks-youtube") {
+        addAutomationLog("[Browser] Safe direct return initiated to saved task page: $restoredUrl")
+        _uiState.update {
+            it.copy(
+                automationState = AutomationState.RECOVERY_IN_PROGRESS,
+                autoWorkStatus = "সংরক্ষিত টাস্ক পেজে সরাসরি ফেরত যাওয়া হচ্ছে..."
+            )
+        }
+    }
+
+    fun reportTaskRestored(taskId: String) {
+        addAutomationLog("[Task] TASK_PAGE_RESTORED: Expected task '$taskId' successfully verified on task page.")
+        _uiState.update {
+            it.copy(
+                automationState = AutomationState.TASK_PAGE_RESTORED,
+                autoWorkStatus = "টাস্ক পেজ সফলভাবে রিস্টোর ও ভেরিফাই করা হয়েছে ✓"
+            )
+        }
+    }
+
     fun stopAutoWork(reason: String = "") {
         addAutomationLog("[Task] Automation stopped: ${reason.ifEmpty { "Manual stop" }}")
         _uiState.update {
@@ -272,6 +353,7 @@ class AvisoViewModel : ViewModel() {
                 isAutoWorkPaused = false,
                 automationState = AutomationState.STOPPED,
                 currentTaskContext = null,
+                currentTaskSession = null,
                 autoWorkCountdownSeconds = 0,
                 autoWorkTotalSeconds = 0,
                 autoWorkStatus = if (reason.isNotEmpty()) reason else "অটো কাজ বন্ধ"

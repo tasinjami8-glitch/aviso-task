@@ -208,11 +208,35 @@ class AvisoBridge(
     private val onInterstitialHandled: (Int) -> Unit = {},
     private val onOpenYouTube: (String) -> Unit = {},
     private val onOpenNewTab: (String, Int) -> Unit = { _, _ -> },
-    private val onAutomationLog: (String) -> Unit = {}
+    private val onAutomationLog: (String) -> Unit = {},
+    private val onTaskSessionLocked: (String, String, Int, String) -> Unit = { _, _, _, _ -> },
+    private val onWrongPageDetected: (String, String) -> Unit = { _, _ -> },
+    private val onTaskMismatchDetected: (String, String) -> Unit = { _, _ -> },
+    private val onTaskRestored: (String) -> Unit = {}
 ) {
     @JavascriptInterface
     fun onAutomationLog(message: String) {
         onAutomationLog.invoke(message)
+    }
+
+    @JavascriptInterface
+    fun onTaskSessionLocked(taskId: String, taskTitle: String, durationSec: Int, containerId: String) {
+        onTaskSessionLocked.invoke(taskId, taskTitle, durationSec, containerId)
+    }
+
+    @JavascriptInterface
+    fun onWrongPageDetected(reason: String, url: String) {
+        onWrongPageDetected.invoke(reason, url)
+    }
+
+    @JavascriptInterface
+    fun onTaskMismatchDetected(expectedId: String, foundId: String) {
+        onTaskMismatchDetected.invoke(expectedId, foundId)
+    }
+
+    @JavascriptInterface
+    fun onTaskRestored(taskId: String) {
+        onTaskRestored.invoke(taskId)
     }
 
     @JavascriptInterface
@@ -509,7 +533,7 @@ fun AvisoBrowserScreen(
         }
     }
 
-    // Auto Work Execution Engine (Strict Task-Only Automation with Manual Pending Confirmation)
+    // Auto Work Execution Engine (Strict Task-Only Automation with Safe Page Lock & Auto-Confirm)
     LaunchedEffect(uiState.isAutoWorkRunning) {
         if (!uiState.isAutoWorkRunning) {
             AvisoNotificationHelper.cancelAutoWorkProgressNotification(context)
@@ -546,10 +570,20 @@ fun AvisoBrowserScreen(
             confirmClickedSignal = false
             realInterstitialDurationSignal = null
 
-            // Step 1: Scan & Find next video task
+            // Step 0: Pre-Scan Wrong Page Safety Verification
+            val curUrl = webViewRef?.url.orEmpty()
+            if (curUrl.isNotEmpty() && !curUrl.contains("tasks-youtube") && !curUrl.contains("/vl/") && !curUrl.contains("/go/") && !curUrl.contains("youtube")) {
+                viewModel.reportWrongPage("NOT_ON_TASK_PAGE", curUrl)
+                viewModel.addAutomationLog("[Protection] Pre-check: Wrong page ($curUrl). Triggering safe recovery.")
+                webViewRef?.loadUrl("https://aviso.bz/tasks-youtube")
+                delay(3500L)
+                viewModel.reportSafeRecovery()
+            }
+
+            // Step 1: Scan & Find next video task with strict Task Container Lock
             viewModel.setAutomationState(AutomationState.TASK_DISCOVERED)
             viewModel.setAutoWorkStatus("টাস্ক তালিকা স্ক্যান ও ভিডিও কাজ লক করা হচ্ছে...")
-            viewModel.addAutomationLog("[Task] Scanning task table for next valid YouTube task")
+            viewModel.addAutomationLog("[Task] Scanning task table for next valid YouTube task (Container Lock Active)")
             webViewRef?.evaluateJavascript(AvisoTaskParser.JS_AUTO_WORK_FIND_AND_CLICK, null)
 
             // Wait for task detection & initiation (up to 5 seconds)
@@ -696,21 +730,28 @@ fun AvisoBrowserScreen(
                 delay(1000L)
             }
 
-            // Step 4: Locate and highlight the Confirm View control on the exact task row (Manual Pending Confirmation)
+            // Step 4: Verify task page integrity before confirmation click
+            val returnUrl = webViewRef?.url.orEmpty()
+            if (!returnUrl.contains("tasks-youtube") && !returnUrl.contains("aviso.bz")) {
+                viewModel.reportWrongPage("RETURN_URL_MISMATCH", returnUrl)
+                viewModel.addAutomationLog("[Protection] Returned to unexpected page ($returnUrl). Recovering to tasks-youtube.")
+                webViewRef?.loadUrl("https://aviso.bz/tasks-youtube")
+                delay(3000L)
+                viewModel.reportSafeRecovery()
+            }
+
+            // Step 5: Locate, Mark / Highlight Confirm View and Click Immediately
             viewModel.setAutomationState(AutomationState.CONFIRMATION_PENDING)
-            viewModel.setAutoWorkStatus("Viewing completed — confirmation pending | Click Confirm view")
-            viewModel.addAutomationLog("[Task] State: CONFIRMATION_PENDING. Highlighted Confirm View for manual user confirmation.")
+            viewModel.setAutoWorkStatus("Confirm view মার্ক ও ক্লিক করা হচ্ছে...")
+            viewModel.addAutomationLog("[Task] Marking Confirm View control and executing instant click within locked container.")
             webViewRef?.evaluateJavascript(AvisoTaskParser.JS_HIGHLIGHT_CONFIRM_BUTTON, null)
+            delay(400L)
+            webViewRef?.evaluateJavascript(AvisoTaskParser.JS_AUTO_WORK_CLICK_CONFIRM, null)
             viewModel.incrementSuccessCount()
 
-            Toast.makeText(context, "Viewing time completed. Click Confirm view for this task.", Toast.LENGTH_LONG).show()
-
-            // Keep the task in a "Viewing completed — confirmation pending" state.
-            // DO NOT click Confirm view automatically.
-            // DO NOT reload or refresh away the pending confirm button.
-            // The task remains available with its confirmation control pending for manual confirmation by user.
-            delay(4000L)
-            viewModel.setAutoWorkStatus("টাস্কের কনফার্মেশন অপেক্ষমান রাখা হয়েছে ✓")
+            delay(1500L)
+            viewModel.setAutoWorkStatus("টাস্ক সফলভাবে সম্পন্ন ও কনফার্ম হয়েছে ✓")
+            viewModel.addAutomationLog("[Task] Task confirmed & rewarded successfully.")
         }
     }
 
@@ -1286,6 +1327,27 @@ fun AvisoBrowserScreen(
                                     onAutomationLog = { logMsg ->
                                         post {
                                             viewModel.addAutomationLog(logMsg)
+                                        }
+                                    },
+                                    onTaskSessionLocked = { taskId, taskTitle, durationSec, containerId ->
+                                        post {
+                                            viewModel.setCurrentTaskSession(taskId, taskTitle, durationSec, containerId)
+                                            viewModel.addAutomationLog("[TaskLock] Locked container: $containerId | Task: $taskId ($durationSec s)")
+                                        }
+                                    },
+                                    onWrongPageDetected = { reason, url ->
+                                        post {
+                                            viewModel.reportWrongPage(reason, url)
+                                        }
+                                    },
+                                    onTaskMismatchDetected = { expected, found ->
+                                        post {
+                                            viewModel.reportTaskMismatch(expected, found)
+                                        }
+                                    },
+                                    onTaskRestored = { taskId ->
+                                        post {
+                                            viewModel.reportTaskRestored(taskId)
                                         }
                                     }
                                 ),

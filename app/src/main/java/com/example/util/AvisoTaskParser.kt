@@ -8,6 +8,106 @@ import org.json.JSONObject
 object AvisoTaskParser {
 
     /**
+     * JavaScript verification routine:
+     * - Validates whether the current page is a valid Aviso task page.
+     * - Detects wrong pages: Balance, Profile, Account, Settings, Dashboard, Finance, Payout, External Ads, Rules, Support, Login.
+     * - Verifies whether the expected locked Task ID exists in the DOM.
+     * - Returns a JSON object with full safety details.
+     */
+    const val JS_VERIFY_PAGE_AND_TASK = """
+        (function() {
+            try {
+                var currentUrl = window.location.href || '';
+                var bodyText = (document.body ? document.body.innerText : '') || '';
+                var lowerUrl = currentUrl.toLowerCase();
+                var lowerBody = bodyText.toLowerCase();
+
+                var isWrong = false;
+                var wrongReason = '';
+
+                // 1. Check domain
+                if (lowerUrl.indexOf('youtube.com') === -1 && lowerUrl.indexOf('youtu.be') === -1 && lowerUrl.indexOf('aviso.bz') === -1) {
+                    isWrong = true;
+                    wrongReason = 'EXTERNAL_DOMAIN_DETECTED: ' + currentUrl;
+                }
+                // 2. Check finance / balance / payout sections
+                else if (lowerUrl.indexOf('/pay') !== -1 || lowerUrl.indexOf('/finance') !== -1 || lowerUrl.indexOf('/payout') !== -1 || 
+                         lowerUrl.indexOf('/deposit') !== -1 || lowerUrl.indexOf('/balance') !== -1 || lowerUrl.indexOf('vivod') !== -1 || lowerUrl.indexOf('popolnit') !== -1) {
+                    isWrong = true;
+                    wrongReason = 'BALANCE_OR_FINANCE_PAGE';
+                }
+                // 3. Check profile / user / account sections
+                else if (lowerUrl.indexOf('/profile') !== -1 || lowerUrl.indexOf('/user/') !== -1 || lowerUrl.indexOf('/account') !== -1 || lowerUrl.indexOf('/wm/') !== -1) {
+                    isWrong = true;
+                    wrongReason = 'PROFILE_OR_ACCOUNT_PAGE';
+                }
+                // 4. Check settings / options
+                else if (lowerUrl.indexOf('/settings') !== -1 || lowerUrl.indexOf('/options') !== -1 || lowerUrl.indexOf('/edit') !== -1) {
+                    isWrong = true;
+                    wrongReason = 'SETTINGS_PAGE';
+                }
+                // 5. Check dashboard / stats / cabinet
+                else if (lowerUrl.indexOf('/dashboard') !== -1 || lowerUrl.indexOf('/cabinet') !== -1 || lowerUrl.indexOf('/stat') !== -1) {
+                    isWrong = true;
+                    wrongReason = 'DASHBOARD_PAGE';
+                }
+                // 6. Check login / authentication
+                else if (lowerUrl.indexOf('/login') !== -1 || lowerUrl.indexOf('/auth') !== -1 || lowerUrl.indexOf('/register') !== -1) {
+                    isWrong = true;
+                    wrongReason = 'LOGIN_PAGE';
+                }
+                // 7. Check rules / support / faq
+                else if (lowerUrl.indexOf('/rules') !== -1 || lowerUrl.indexOf('/faq') !== -1 || lowerUrl.indexOf('/support') !== -1) {
+                    isWrong = true;
+                    wrongReason = 'RULES_OR_SUPPORT_PAGE';
+                }
+                // 8. Check if not in valid task path
+                else if (lowerUrl.indexOf('tasks-youtube') === -1 && lowerUrl.indexOf('/vl/') === -1 && lowerUrl.indexOf('/go/') === -1 && 
+                         lowerUrl.indexOf('create_session') === -1 && lowerUrl.indexOf('youtube.com') === -1 && lowerUrl.indexOf('youtu.be') === -1) {
+                    isWrong = true;
+                    wrongReason = 'UNRECOGNIZED_AVISO_SECTION: ' + currentUrl;
+                }
+
+                // Verify active session & task ID if on Aviso
+                var expectedTaskId = window._avisoLastTaskId || (window._avisoActiveSession ? window._avisoActiveSession.taskId : '');
+                var hasExpectedTask = false;
+                var matchedTaskId = '';
+                var isConfirmButtonPresent = false;
+
+                if (!isWrong && (lowerUrl.indexOf('tasks-youtube') !== -1 || lowerUrl.indexOf('aviso.bz') !== -1)) {
+                    if (expectedTaskId) {
+                        var taskEl = document.getElementById(expectedTaskId) || document.querySelector('[data-task-id="' + expectedTaskId + '"]');
+                        if (taskEl) {
+                            hasExpectedTask = true;
+                            matchedTaskId = expectedTaskId;
+                            var conf = taskEl.querySelector('button, a, input, [role="button"]');
+                            if (conf) isConfirmButtonPresent = true;
+                        }
+                    }
+                }
+
+                var res = {
+                    currentUrl: currentUrl,
+                    isWrongPage: isWrong,
+                    wrongReason: wrongReason,
+                    hasExpectedTask: hasExpectedTask,
+                    matchedTaskId: matchedTaskId,
+                    isTasksYoutubePage: lowerUrl.indexOf('tasks-youtube') !== -1,
+                    isConfirmButtonPresent: isConfirmButtonPresent
+                };
+
+                if (isWrong && window.AvisoBridge && window.AvisoBridge.onWrongPageDetected) {
+                    window.AvisoBridge.onWrongPageDetected(wrongReason, currentUrl);
+                }
+
+                return JSON.stringify(res);
+            } catch(e) {
+                return JSON.stringify({ isWrongPage: false, error: e.toString() });
+            }
+        })();
+    """
+
+    /**
      * JavaScript code to be injected into Aviso WebView.
      * Evaluates every full site element, task cards, badges, and user session status.
      */
