@@ -262,17 +262,16 @@ object AvisoTaskParser {
                 window._avisoVideoPlayTriggered = false;
                 window._avisoVideoPositionReported = false;
 
-                // 1. Enforce same-window navigation
-                window.open = function(url) {
-                    if (url && url !== 'about:blank' && url.indexOf('javascript:') === -1) {
-                        window.location.href = url;
-                    }
-                    return window;
-                };
-                var blankLinks = document.querySelectorAll('a[target="_blank"], a[target="_new"], a[target]');
-                for (var b = 0; b < blankLinks.length; b++) {
-                    blankLinks[b].target = '_self';
-                    blankLinks[b].removeAttribute('target');
+                function extractDur(el) {
+                    try {
+                        var row = el ? (el.closest ? (el.closest('tr') || el.closest('.work-serf') || el.closest('.task-item') || el.closest('div')) : null) : null;
+                        var txt = (row ? row.innerText : '') || (document.body ? document.body.innerText : '') || '';
+                        var mS = txt.match(/(\d+)\s*(?:сек|sec|секунд)/i);
+                        if (mS) return parseInt(mS[1], 10) || 20;
+                        var mM = txt.match(/(\d+)\s*(?:min|минут)/i);
+                        if (mM) return (parseInt(mM[1], 10) || 1) * 60;
+                    } catch(e) {}
+                    return 20;
                 }
 
                 // Clean, reliable click helper
@@ -280,12 +279,9 @@ object AvisoTaskParser {
                     if (!el) return false;
                     try { el.scrollIntoView({ behavior: 'instant', block: 'center' }); } catch(e) {}
                     var aTag = (el.tagName === 'A') ? el : (el.closest ? el.closest('a') : null);
-
                     var href = (aTag ? aTag.getAttribute('href') : null) || el.getAttribute('href');
-                    if (aTag) {
-                        aTag.removeAttribute('target');
-                        aTag.setAttribute('target', '_self');
-                    }
+                    var dur = extractDur(el);
+
                     try { el.focus(); } catch(e) {}
                     
                     try {
@@ -314,9 +310,11 @@ object AvisoTaskParser {
 
                     if (href && href !== '#' && href.indexOf('javascript:') === -1 &&
                         (href.indexOf('/vl') !== -1 || href.indexOf('/go/') !== -1 || href.indexOf('create_session') !== -1 || href.indexOf('youtube') !== -1 || href.indexOf('youtu.be') !== -1)) {
-                        setTimeout(function() {
+                        if (window.AvisoBridge && window.AvisoBridge.openNewTab) {
+                            window.AvisoBridge.openNewTab(href, dur);
+                        } else {
                             window.location.href = (aTag ? aTag.href : null) || href;
-                        }, 120);
+                        }
                     }
                     return true;
                 }

@@ -54,7 +54,7 @@ data class AvisoUiState(
     val videoTabTitle: String = "🎬 ভিডিও",
     val videoTabDuration: Int = 0,
     val videoTabRemainingSec: Int = 0,
-    val openInExternalYouTubeApp: Boolean = true
+    val openInExternalYouTubeApp: Boolean = false
 )
 
 class AvisoViewModel : ViewModel() {
