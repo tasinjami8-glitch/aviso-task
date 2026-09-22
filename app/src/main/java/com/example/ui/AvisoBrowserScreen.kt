@@ -357,9 +357,18 @@ fun AvisoBrowserScreen(
     }
 
     // When Video Tab URL changes or is opened, load in secondary video webview
+    var lastLoadedVideoUrl by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(uiState.isVideoTabOpen) {
+        if (!uiState.isVideoTabOpen) {
+            lastLoadedVideoUrl = null
+        }
+    }
+
     LaunchedEffect(uiState.videoTabUrl) {
         val url = uiState.videoTabUrl
-        if (!url.isNullOrBlank() && secondaryWebViewRef?.url != url) {
+        if (!url.isNullOrBlank() && url != lastLoadedVideoUrl) {
+            lastLoadedVideoUrl = url
             secondaryWebViewRef?.loadUrl(url)
         }
     }
@@ -1467,123 +1476,16 @@ fun AvisoBrowserScreen(
                         .zIndex(if (isCurrentTabVideo) 2f else 0f)
                         .alpha(if (isCurrentTabVideo) 1f else 0.001f)
                 ) {
-                    Column(
+                    Box(
                         modifier = Modifier
                             .fillMaxSize()
                             .background(Color(0xFF0F172A))
                             .testTag("video_tab_container")
                     ) {
-                        // Top Info Banner in Tab 2
-                        Surface(
-                            color = Color(0xFF1E293B),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
-                            ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier.weight(1f)
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(28.dp)
-                                                .clip(CircleShape)
-                                                .background(Color(0xFFEF4444)),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.PlayArrow,
-                                                contentDescription = null,
-                                                tint = Color.White,
-                                                modifier = Modifier.size(18.dp)
-                                            )
-                                        }
-                                        Spacer(modifier = Modifier.width(10.dp))
-                                        Column {
-                                            Text(
-                                                text = "🎬 ভিডিও দেখা হচ্ছে: ${uiState.videoTabRemainingSec} সেকেন্ড বাকি",
-                                                color = Color.White,
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 13.sp
-                                            )
-                                            Text(
-                                                text = "ট্যাব পরিবর্তন করতে উপরের ট্যাবে ক্লিক করুন | শেষ হলে মূল পেজে কনফার্ম হবে ✓",
-                                                color = Color(0xFF94A3B8),
-                                                fontSize = 11.sp
-                                            )
-                                        }
-                                    }
-
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        // Open in YouTube App button
-                                        OutlinedButton(
-                                            onClick = {
-                                                uiState.videoTabUrl?.let { launchYouTubeApp(context, it) }
-                                            },
-                                            modifier = Modifier.height(32.dp),
-                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                                            border = BorderStroke(1.dp, Color(0xFF38BDF8))
-                                        ) {
-                                            Icon(
-                                                Icons.Default.PlayArrow,
-                                                contentDescription = null,
-                                                tint = Color(0xFF38BDF8),
-                                                modifier = Modifier.size(14.dp)
-                                            )
-                                            Spacer(modifier = Modifier.width(3.dp))
-                                            Text("YouTube অ্যাপ", fontSize = 11.sp, color = Color(0xFF38BDF8))
-                                        }
-
-                                        // Close tab button
-                                        OutlinedButton(
-                                            onClick = {
-                                                viewModel.closeVideoTab()
-                                                viewModel.selectTab(0)
-                                            },
-                                            modifier = Modifier.height(32.dp),
-                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                                            border = BorderStroke(1.dp, Color(0xFFEF4444))
-                                        ) {
-                                            Icon(
-                                                Icons.Default.Close,
-                                                contentDescription = null,
-                                                tint = Color(0xFFEF4444),
-                                                modifier = Modifier.size(14.dp)
-                                            )
-                                            Spacer(modifier = Modifier.width(3.dp))
-                                            Text("ট্যাব বন্ধ", fontSize = 11.sp, color = Color(0xFFEF4444))
-                                        }
-                                    }
-                                }
-
-                                Spacer(modifier = Modifier.height(8.dp))
-                                val tot = if (uiState.videoTabDuration > 0) uiState.videoTabDuration else 20
-                                LinearProgressIndicator(
-                                    progress = { (uiState.videoTabRemainingSec.toFloat() / tot).coerceIn(0f, 1f) },
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(4.dp)
-                                        .clip(RoundedCornerShape(2.dp)),
-                                    color = Color(0xFFEF4444),
-                                    trackColor = Color(0xFF334155)
-                                )
-                            }
-                        }
-
-                        // Video WebView inside Tab 2
+                        // Video WebView inside Tab 2 (full screen without overlay banner)
                         AndroidView(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .weight(1f)
                                 .testTag("secondary_video_webview"),
                             factory = { ctx ->
                                 WebView(ctx).apply {
@@ -1703,14 +1605,18 @@ fun AvisoBrowserScreen(
                                         }
                                     }
 
-                                    uiState.videoTabUrl?.let { loadUrl(it) }
+                                    uiState.videoTabUrl?.let {
+                                        lastLoadedVideoUrl = it
+                                        loadUrl(it)
+                                    }
                                     secondaryWebViewRef = this
                                 }
                             },
                             update = { wv ->
                                 secondaryWebViewRef = wv
                                 val curVideoUrl = uiState.videoTabUrl
-                                if (!curVideoUrl.isNullOrEmpty() && wv.url != curVideoUrl) {
+                                if (!curVideoUrl.isNullOrEmpty() && curVideoUrl != lastLoadedVideoUrl) {
+                                    lastLoadedVideoUrl = curVideoUrl
                                     wv.loadUrl(curVideoUrl)
                                 }
                             }
