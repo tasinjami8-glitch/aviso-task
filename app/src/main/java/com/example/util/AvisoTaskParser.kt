@@ -142,6 +142,17 @@ object AvisoTaskParser {
     const val JS_SETUP_OVERRIDE = """
         (function() {
             try {
+                function resolveFullUrl(u) {
+                    if (!u) return '';
+                    try {
+                        var dummy = document.createElement('a');
+                        dummy.href = u;
+                        return dummy.href;
+                    } catch(e) {
+                        return u;
+                    }
+                }
+
                 function extractDur(el) {
                     try {
                         var row = el.closest ? (el.closest('tr') || el.closest('.work-serf') || el.closest('.task-item') || el.closest('div')) : null;
@@ -156,22 +167,23 @@ object AvisoTaskParser {
 
                 function handleOpenUrl(url, duration) {
                     if (!url || url === 'about:blank' || url.indexOf('javascript:') === 0) return;
+                    var fullUrl = resolveFullUrl(url);
                     var dur = duration || 20;
-                    var isYT = (url.indexOf('youtube.com') !== -1 || url.indexOf('youtu.be') !== -1);
-                    var isSession = (url.indexOf('/vl/') !== -1 || url.indexOf('/go/') !== -1 || url.indexOf('create_session') !== -1 || url.indexOf('youtube.php') !== -1);
+                    var isYT = (fullUrl.indexOf('youtube.com') !== -1 || fullUrl.indexOf('youtu.be') !== -1);
+                    var isSession = (fullUrl.indexOf('/vl/') !== -1 || fullUrl.indexOf('/go/') !== -1 || fullUrl.indexOf('create_session') !== -1 || fullUrl.indexOf('youtube.php') !== -1);
                     
                     if (isYT || isSession) {
                         if (window.AvisoBridge && window.AvisoBridge.openNewTab) {
-                            window.AvisoBridge.openNewTab(url, dur);
+                            window.AvisoBridge.openNewTab(fullUrl, dur);
                             return;
                         }
                     } else {
                         if (window.AvisoBridge && window.AvisoBridge.openNewTab) {
-                            window.AvisoBridge.openNewTab(url, 0);
+                            window.AvisoBridge.openNewTab(fullUrl, 0);
                             return;
                         }
                     }
-                    window.location.href = url;
+                    window.location.href = fullUrl;
                 }
 
                 // Override window.open to delegate to separate Tab system
@@ -203,15 +215,16 @@ object AvisoTaskParser {
 
                     var a = (el.tagName === 'A') ? el : (el.closest ? el.closest('a') : null);
                     if (a) {
-                        var href = (a.getAttribute('href') || a.href || '').toString();
+                        var rawHref = (a.getAttribute('href') || a.href || '').toString();
+                        var fullHref = resolveFullUrl(rawHref);
                         var target = (a.getAttribute('target') || '').toLowerCase();
-                        var isYT = (href.indexOf('youtube.com') !== -1 || href.indexOf('youtu.be') !== -1);
-                        var isSession = (href.indexOf('/vl/') !== -1 || href.indexOf('/go/') !== -1 || href.indexOf('create_session') !== -1 || href.indexOf('youtube.php') !== -1);
+                        var isYT = (fullHref.indexOf('youtube.com') !== -1 || fullHref.indexOf('youtu.be') !== -1);
+                        var isSession = (fullHref.indexOf('/vl/') !== -1 || fullHref.indexOf('/go/') !== -1 || fullHref.indexOf('create_session') !== -1 || fullHref.indexOf('youtube.php') !== -1);
                         
                         if (isYT || isSession || target === '_blank') {
                             e.preventDefault();
                             var d = extractDur(a);
-                            handleOpenUrl(a.getAttribute('href') || a.href, d);
+                            handleOpenUrl(fullHref, d);
                             return;
                         }
                     }
@@ -223,11 +236,12 @@ object AvisoTaskParser {
                     if (t.indexOf('приступить к просмотру') !== -1 || t.indexOf('начать просмотр') !== -1 || t.indexOf('start watching') !== -1 ||
                         cls.indexOf('btn_play') !== -1 || oc.indexOf('start_youtube') !== -1 || oc.indexOf('func_start') !== -1) {
                         var dur = extractDur(el);
+                        var rawClickHref = (a ? a.href : '') || (el.getAttribute ? el.getAttribute('href') : '') || '';
+                        var fullClickHref = resolveFullUrl(rawClickHref);
                         if (window.AvisoBridge && window.AvisoBridge.openNewTab) {
-                            var clickHref = (a ? a.href : '') || (el.getAttribute ? el.getAttribute('href') : '') || '';
-                            if (clickHref && (clickHref.indexOf('/vl/') !== -1 || clickHref.indexOf('youtube') !== -1)) {
+                            if (fullClickHref && (fullClickHref.indexOf('/vl/') !== -1 || fullClickHref.indexOf('youtube') !== -1 || fullClickHref.indexOf('create_session') !== -1)) {
                                 e.preventDefault();
-                                handleOpenUrl(clickHref, dur);
+                                handleOpenUrl(fullClickHref, dur);
                             }
                         }
                     }
@@ -628,20 +642,24 @@ object AvisoTaskParser {
 
                 function safeClick(el) {
                     if (!el) return false;
-                    try { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch(e) {}
+                    try { el.scrollIntoView({ behavior: 'instant', block: 'center' }); } catch(e) {}
                     try { el.focus(); } catch(e) {}
                     try {
                         var rect = el.getBoundingClientRect();
-                        var cx = rect.left + rect.width / 2;
-                        var cy = rect.top + rect.height / 2;
-                        var mdown = new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy });
-                        var mup = new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy });
-                        var mclick = new MouseEvent('click', { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy });
-                        el.dispatchEvent(mdown);
-                        el.dispatchEvent(mup);
-                        el.dispatchEvent(mclick);
+                        var cx = (rect.left + rect.width / 2) || 100;
+                        var cy = (rect.top + rect.height / 2) || 100;
+                        var opts = { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy };
+                        el.dispatchEvent(new PointerEvent('pointerdown', opts));
+                        el.dispatchEvent(new MouseEvent('mousedown', opts));
+                        el.dispatchEvent(new PointerEvent('pointerup', opts));
+                        el.dispatchEvent(new MouseEvent('mouseup', opts));
+                        el.dispatchEvent(new MouseEvent('click', opts));
                     } catch(e) {}
                     try { el.click(); } catch(e) {}
+                    var aParent = el.closest ? el.closest('a, button') : null;
+                    if (aParent && aParent !== el) {
+                        try { aParent.click(); } catch(e) {}
+                    }
                     if (el.getAttribute && el.getAttribute('onclick')) {
                         try {
                             var fn = new Function(el.getAttribute('onclick'));
@@ -653,22 +671,23 @@ object AvisoTaskParser {
 
                 function isConfirmBtn(el) {
                     if (!el) return false;
-                    var t = (el.innerText || el.value || '').trim().toLowerCase();
+                    var t = (el.innerText || el.textContent || el.value || '').trim().toLowerCase();
                     var cls = (el.className || '').toString().toLowerCase();
                     var oc = (el.getAttribute('onclick') || '').toLowerCase();
                     var id = (el.id || '').toLowerCase();
 
                     if (!t && !cls && !oc && !id) return false;
 
-                    if (t.indexOf('отмена') !== -1 || t.indexOf('cancel') !== -1 || t.indexOf('жалоб') !== -1 || t.indexOf('delete') !== -1) {
+                    if (t.indexOf('отмена') !== -1 || t.indexOf('cancel') !== -1 || t.indexOf('жалоб') !== -1 || t.indexOf('delete') !== -1 || t.indexOf('удалить') !== -1) {
                         return false;
                     }
 
                     if (t.indexOf('подтвердить просмотр') !== -1 ||
                         t.indexOf('подтвердить') !== -1 ||
+                        t.indexOf('подтверждаю') !== -1 ||
+                        t.indexOf('проверить просмотр') !== -1 ||
                         t.indexOf('проверить выполнение') !== -1 ||
                         t.indexOf('проверить задание') !== -1 ||
-                        t.indexOf('проверить просмотр') !== -1 ||
                         t.indexOf('проверить') !== -1 ||
                         t.indexOf('забрать награду') !== -1 ||
                         t.indexOf('забрать деньги') !== -1 ||
@@ -680,12 +699,31 @@ object AvisoTaskParser {
                         t.indexOf('получить') !== -1 ||
                         t.indexOf('клик для подтверждения') !== -1 ||
                         t.indexOf('нажмите для подтверждения') !== -1 ||
+                        t.indexOf('кликните для подтверждения') !== -1 ||
+                        t.indexOf('засчитать просмотр') !== -1 ||
+                        t.indexOf('засчитать') !== -1 ||
+                        t.indexOf('просмотр засчитан') !== -1 ||
+                        t.indexOf('я просмотрел видео') !== -1 ||
+                        t.indexOf('завершить') !== -1 ||
                         t.indexOf('confirm view') !== -1 ||
                         t.indexOf('confirm') !== -1 ||
+                        t.indexOf('verify view') !== -1 ||
+                        t.indexOf('verify execution') !== -1 ||
                         t.indexOf('verify') !== -1 ||
+                        t.indexOf('check view') !== -1 ||
+                        t.indexOf('check task') !== -1 ||
+                        t.indexOf('check') !== -1 ||
+                        t.indexOf('claim reward') !== -1 ||
                         t.indexOf('claim') !== -1 ||
                         t.indexOf('get reward') !== -1 ||
-                        t.indexOf('get money') !== -1) {
+                        t.indexOf('get money') !== -1 ||
+                        t.indexOf('click to confirm') !== -1 ||
+                        t.indexOf('tap to confirm') !== -1 ||
+                        t.indexOf('finish') !== -1 ||
+                        t.indexOf('complete') !== -1 ||
+                        t.indexOf('নিশ্চিত করুন') !== -1 ||
+                        t.indexOf('যাচাই করুন') !== -1 ||
+                        t.indexOf('ভিউ নিশ্চিত') !== -1) {
                         return true;
                     }
 
@@ -695,12 +733,15 @@ object AvisoTaskParser {
                         cls.indexOf('btn_success') !== -1 ||
                         cls.indexOf('btn-success') !== -1 ||
                         cls.indexOf('btn_youtube') !== -1 ||
+                        cls.indexOf('btn-verify') !== -1 ||
+                        cls.indexOf('btn_verify') !== -1 ||
                         oc.indexOf('confirm') !== -1 ||
                         oc.indexOf('check_task') !== -1 ||
                         oc.indexOf('check_adv') !== -1 ||
                         oc.indexOf('func_check') !== -1 ||
                         oc.indexOf('get_money') !== -1 ||
                         oc.indexOf('confirm_view') !== -1 ||
+                        oc.indexOf('verify') !== -1 ||
                         id.indexOf('confirm') !== -1 ||
                         id.indexOf('btn_check') !== -1 ||
                         id.indexOf('btn-check') !== -1 ||
@@ -897,20 +938,24 @@ object AvisoTaskParser {
 
                 function safeClick(el) {
                     if (!el) return false;
-                    try { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch(e) {}
+                    try { el.scrollIntoView({ behavior: 'instant', block: 'center' }); } catch(e) {}
                     try { el.focus(); } catch(e) {}
                     try {
                         var rect = el.getBoundingClientRect();
-                        var cx = rect.left + rect.width / 2;
-                        var cy = rect.top + rect.height / 2;
-                        var mdown = new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy });
-                        var mup = new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy });
-                        var mclick = new MouseEvent('click', { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy });
-                        el.dispatchEvent(mdown);
-                        el.dispatchEvent(mup);
-                        el.dispatchEvent(mclick);
+                        var cx = (rect.left + rect.width / 2) || 100;
+                        var cy = (rect.top + rect.height / 2) || 100;
+                        var opts = { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy };
+                        el.dispatchEvent(new PointerEvent('pointerdown', opts));
+                        el.dispatchEvent(new MouseEvent('mousedown', opts));
+                        el.dispatchEvent(new PointerEvent('pointerup', opts));
+                        el.dispatchEvent(new MouseEvent('mouseup', opts));
+                        el.dispatchEvent(new MouseEvent('click', opts));
                     } catch(e) {}
                     try { el.click(); } catch(e) {}
+                    var aParent = el.closest ? el.closest('a, button') : null;
+                    if (aParent && aParent !== el) {
+                        try { aParent.click(); } catch(e) {}
+                    }
                     if (el.getAttribute && el.getAttribute('onclick')) {
                         try {
                             var fn = new Function(el.getAttribute('onclick'));
@@ -922,22 +967,26 @@ object AvisoTaskParser {
 
                 function isConfirmBtn(el) {
                     if (!el) return false;
-                    var t = (el.innerText || el.value || '').trim().toLowerCase();
+                    var t = (el.innerText || el.textContent || el.value || '').trim().toLowerCase();
                     var cls = (el.className || '').toString().toLowerCase();
                     var oc = (el.getAttribute('onclick') || '').toLowerCase();
                     var id = (el.id || '').toLowerCase();
+                    var role = (el.getAttribute('role') || '').toLowerCase();
 
                     if (!t && !cls && !oc && !id) return false;
 
-                    if (t.indexOf('отмена') !== -1 || t.indexOf('cancel') !== -1 || t.indexOf('жалоб') !== -1 || t.indexOf('delete') !== -1) {
+                    // Exclude negative / non-confirm elements
+                    if (t.indexOf('отмена') !== -1 || t.indexOf('cancel') !== -1 || t.indexOf('жалоб') !== -1 || t.indexOf('delete') !== -1 || t.indexOf('удалить') !== -1 || t.indexOf('правила') !== -1) {
                         return false;
                     }
 
+                    // 1. Russian keywords (entire page search)
                     if (t.indexOf('подтвердить просмотр') !== -1 ||
                         t.indexOf('подтвердить') !== -1 ||
+                        t.indexOf('подтверждаю') !== -1 ||
+                        t.indexOf('проверить просмотр') !== -1 ||
                         t.indexOf('проверить выполнение') !== -1 ||
                         t.indexOf('проверить задание') !== -1 ||
-                        t.indexOf('проверить просмотр') !== -1 ||
                         t.indexOf('проверить') !== -1 ||
                         t.indexOf('забрать награду') !== -1 ||
                         t.indexOf('забрать деньги') !== -1 ||
@@ -949,27 +998,60 @@ object AvisoTaskParser {
                         t.indexOf('получить') !== -1 ||
                         t.indexOf('клик для подтверждения') !== -1 ||
                         t.indexOf('нажмите для подтверждения') !== -1 ||
-                        t.indexOf('confirm view') !== -1 ||
-                        t.indexOf('confirm') !== -1 ||
-                        t.indexOf('verify') !== -1 ||
-                        t.indexOf('claim') !== -1 ||
-                        t.indexOf('get reward') !== -1 ||
-                        t.indexOf('get money') !== -1) {
+                        t.indexOf('кликните для подтверждения') !== -1 ||
+                        t.indexOf('засчитать просмотр') !== -1 ||
+                        t.indexOf('засчитать') !== -1 ||
+                        t.indexOf('просмотр засчитан') !== -1 ||
+                        t.indexOf('я просмотрел видео') !== -1 ||
+                        t.indexOf('завершить') !== -1) {
                         return true;
                     }
 
+                    // 2. English keywords
+                    if (t.indexOf('confirm view') !== -1 ||
+                        t.indexOf('confirm') !== -1 ||
+                        t.indexOf('verify view') !== -1 ||
+                        t.indexOf('verify execution') !== -1 ||
+                        t.indexOf('verify') !== -1 ||
+                        t.indexOf('check view') !== -1 ||
+                        t.indexOf('check task') !== -1 ||
+                        t.indexOf('check') !== -1 ||
+                        t.indexOf('claim reward') !== -1 ||
+                        t.indexOf('claim') !== -1 ||
+                        t.indexOf('get reward') !== -1 ||
+                        t.indexOf('get money') !== -1 ||
+                        t.indexOf('click to confirm') !== -1 ||
+                        t.indexOf('tap to confirm') !== -1 ||
+                        t.indexOf('finish') !== -1 ||
+                        t.indexOf('complete') !== -1) {
+                        return true;
+                    }
+
+                    // 3. Bengali keywords (if translated)
+                    if (t.indexOf('নিশ্চিত করুন') !== -1 ||
+                        t.indexOf('যাচাই করুন') !== -1 ||
+                        t.indexOf('ভিউ নিশ্চিত') !== -1 ||
+                        t.indexOf('পুরস্কার') !== -1 ||
+                        t.indexOf('সম্পন্ন') !== -1) {
+                        return true;
+                    }
+
+                    // 4. CSS Classes & IDs & OnClick functions
                     if (cls.indexOf('btn_confirm') !== -1 ||
                         cls.indexOf('btn_check') !== -1 ||
                         cls.indexOf('confirm-btn') !== -1 ||
                         cls.indexOf('btn_success') !== -1 ||
                         cls.indexOf('btn-success') !== -1 ||
                         cls.indexOf('btn_youtube') !== -1 ||
+                        cls.indexOf('btn-verify') !== -1 ||
+                        cls.indexOf('btn_verify') !== -1 ||
                         oc.indexOf('confirm') !== -1 ||
                         oc.indexOf('check_task') !== -1 ||
                         oc.indexOf('check_adv') !== -1 ||
                         oc.indexOf('func_check') !== -1 ||
                         oc.indexOf('get_money') !== -1 ||
                         oc.indexOf('confirm_view') !== -1 ||
+                        oc.indexOf('verify') !== -1 ||
                         id.indexOf('confirm') !== -1 ||
                         id.indexOf('btn_check') !== -1 ||
                         id.indexOf('btn-check') !== -1 ||
@@ -986,7 +1068,7 @@ object AvisoTaskParser {
                 if (window._avisoLastTaskRow && document.body.contains(window._avisoLastTaskRow)) {
                     var row = window._avisoLastTaskRow;
                     try { row.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch(e) {}
-                    var rowCandidates = row.querySelectorAll('button, a, input[type="button"], span[role="button"], div[role="button"], span, div');
+                    var rowCandidates = row.querySelectorAll('button, a, input, span, div, p, strong, b, [role="button"]');
                     for (var r = 0; r < rowCandidates.length; r++) {
                         if (isConfirmBtn(rowCandidates[r])) {
                             safeClick(rowCandidates[r]);
@@ -996,13 +1078,13 @@ object AvisoTaskParser {
                     }
                 }
 
-                // 2. Global search across all documents and frames
+                // 2. Global search across all documents, frames, and sub-elements
                 if (!clicked) {
                     for (var d = 0; d < docs.length; d++) {
-                        var allCandidates = docs[d].querySelectorAll('#btn_check, .btn_confirm, [id*="confirm"], [id*="check"], button, a, input[type="button"], span[role="button"], div[role="button"], span, div');
+                        var allCandidates = docs[d].querySelectorAll('#btn_check, .btn_confirm, .btn-success, .btn_success, [id*="confirm"], [id*="check"], button, a, input, span, div, p, strong, b, [role="button"]');
                         for (var i = 0; i < allCandidates.length; i++) {
                             var el = allCandidates[i];
-                            if (isConfirmBtn(el) && el.offsetParent !== null) {
+                            if (isConfirmBtn(el)) {
                                 safeClick(el);
                                 clicked = true;
                                 break;

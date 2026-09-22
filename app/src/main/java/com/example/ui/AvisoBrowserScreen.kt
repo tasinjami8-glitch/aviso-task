@@ -372,6 +372,18 @@ fun AvisoBrowserScreen(
         }
     }
 
+    // Fast Continuous Auto-Confirm Scanner Loop (runs across main & video tabs)
+    // Automatically detects and clicks any Confirm / Verify / Подтвердить button on the page in Russian or English
+    LaunchedEffect(Unit) {
+        while (isActive) {
+            delay(800L)
+            webViewRef?.evaluateJavascript(AvisoTaskParser.JS_AUTO_WORK_CLICK_CONFIRM, null)
+            if (uiState.isVideoTabOpen) {
+                secondaryWebViewRef?.evaluateJavascript(AvisoTaskParser.JS_AUTO_WORK_CLICK_CONFIRM, null)
+            }
+        }
+    }
+
     var autoWorkTaskStartedSignal by remember { mutableStateOf<Int?>(null) }
     var autoWorkNoTasksSignal by remember { mutableStateOf(false) }
     var realTimerSecondsSignal by remember { mutableStateOf(-1) }
@@ -1544,10 +1556,58 @@ fun AvisoBrowserScreen(
                                         useWideViewPort = true
                                         mediaPlaybackRequiresUserGesture = false
                                         setSupportMultipleWindows(true)
+                                        javaScriptCanOpenWindowsAutomatically = true
                                         mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                                         cacheMode = WebSettings.LOAD_DEFAULT
                                         userAgentString = "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36"
                                     }
+
+                                    addJavascriptInterface(
+                                        AvisoBridge(
+                                            onResult = {},
+                                            onCaptchaFound = { msg ->
+                                                post { viewModel.onCaptchaDetected(ctx, msg) }
+                                            },
+                                            onTaskStarted = { dur ->
+                                                post { viewModel.updateVideoTabCountdown(dur, dur) }
+                                            },
+                                            onRealTimerUpdate = { sec ->
+                                                post {
+                                                    if (sec >= 0) {
+                                                        viewModel.updateVideoTabCountdown(sec, uiState.videoTabDuration)
+                                                    }
+                                                }
+                                            },
+                                            onTaskCompleted = {
+                                                post { viewModel.incrementSuccessCount() }
+                                            },
+                                            onConfirmClicked = { clicked ->
+                                                post {
+                                                    if (clicked) {
+                                                        viewModel.incrementSuccessCount()
+                                                    }
+                                                }
+                                            },
+                                            onInterstitialHandled = { dur ->
+                                                post { viewModel.updateVideoTabCountdown(dur, dur) }
+                                            },
+                                            onOpenYouTube = { ytUrl ->
+                                                post {
+                                                    if (uiState.openInExternalYouTubeApp && ytUrl.isNotEmpty()) {
+                                                        launchYouTubeApp(ctx, ytUrl)
+                                                    }
+                                                }
+                                            },
+                                            onOpenNewTab = { newUrl, dur ->
+                                                post {
+                                                    if (newUrl.isNotBlank()) {
+                                                        loadUrl(newUrl)
+                                                    }
+                                                }
+                                            }
+                                        ),
+                                        "AvisoBridge"
+                                    )
 
                                     webChromeClient = WebChromeClient()
                                     webViewClient = object : WebViewClient() {
@@ -1563,10 +1623,17 @@ fun AvisoBrowserScreen(
                                             return false
                                         }
 
+                                        override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                                            super.onPageStarted(view, url, favicon)
+                                            view?.evaluateJavascript(AvisoTaskParser.JS_SETUP_OVERRIDE, null)
+                                        }
+
                                         override fun onPageFinished(view: WebView?, url: String?) {
+                                            view?.evaluateJavascript(AvisoTaskParser.JS_SETUP_OVERRIDE, null)
                                             view?.evaluateJavascript(AvisoTaskParser.JS_START_AND_WATCH_VIDEO, null)
                                             view?.postDelayed({
                                                 view.evaluateJavascript(AvisoTaskParser.JS_START_AND_WATCH_VIDEO, null)
+                                                view.evaluateJavascript(AvisoTaskParser.JS_AUTO_WORK_CLICK_CONFIRM, null)
                                             }, 1200L)
                                         }
 
