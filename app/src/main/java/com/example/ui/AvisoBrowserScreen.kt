@@ -455,45 +455,36 @@ fun AvisoBrowserScreen(
     }
 
     // Secondary Video Tab Countdown & Auto-Close Engine for Manual Mode
-    LaunchedEffect(uiState.isVideoTabOpen, uiState.videoTabUrl, uiState.isAutoWorkRunning) {
+    LaunchedEffect(uiState.isVideoTabOpen, uiState.videoTabUrl, uiState.videoTabDuration, uiState.isAutoWorkRunning) {
         if (!uiState.isVideoTabOpen || uiState.videoTabUrl.isNullOrEmpty() || uiState.isAutoWorkRunning) {
             return@LaunchedEffect
         }
-        val taskSec = if (uiState.videoTabDuration > 0) uiState.videoTabDuration else 20
+        var taskSec = (uiState.videoTabDuration.takeIf { it > 0 } ?: realInterstitialDurationSignal ?: autoWorkTaskStartedSignal ?: 20).coerceAtLeast(5)
         var totalSec = taskSec + 1 // +1 second extra wait buffer as requested
         var remaining = totalSec
+        taskCompletedSignal = false
+        confirmClickedSignal = false
+        realTimerSecondsSignal = -1
         viewModel.updateVideoTabCountdown(remaining, totalSec)
 
-        while (isActive && uiState.isVideoTabOpen && !uiState.isAutoWorkRunning) {
-            // Check if confirm already clicked or task marked completed by DOM
-            if (taskCompletedSignal || confirmClickedSignal) {
-                break
-            }
-
-            // Sync with real timer from DOM if available
-            if (realTimerSecondsSignal > 0) {
-                remaining = realTimerSecondsSignal
-                if (realTimerSecondsSignal > totalSec) {
-                    totalSec = realTimerSecondsSignal
-                }
-            } else if (realTimerSecondsSignal == 0) {
-                remaining = 0
-            } else {
-                remaining--
+        while (isActive && uiState.isVideoTabOpen && remaining > 0 && !uiState.isAutoWorkRunning) {
+            // Check if page interstitial or bridge reported a higher duration
+            if (realInterstitialDurationSignal != null && realInterstitialDurationSignal!! > taskSec) {
+                val newDur = realInterstitialDurationSignal!!
+                val diff = newDur - taskSec
+                remaining += diff
+                taskSec = newDur
+                totalSec = newDur + 1
             }
 
             viewModel.updateVideoTabCountdown(remaining, totalSec)
             AvisoNotificationHelper.showAutoWorkProgressNotification(context, remaining, totalSec)
 
-            // Trigger player watcher and confirm click detection on both tabs
+            // Keep video playing and unmuted
             secondaryWebViewRef?.evaluateJavascript(AvisoTaskParser.JS_START_AND_WATCH_VIDEO, null)
-            webViewRef?.evaluateJavascript(AvisoTaskParser.JS_START_AND_WATCH_VIDEO, null)
-
-            if (remaining <= 0 && realTimerSecondsSignal <= 0) {
-                break
-            }
 
             delay(1000L)
+            remaining--
         }
 
         if (uiState.isVideoTabOpen && !uiState.isAutoWorkRunning) {
@@ -501,23 +492,17 @@ fun AvisoBrowserScreen(
             bringAppToFront(context)
             AvisoNotificationHelper.sendAutoWorkFinishedNotification(context)
 
-            // Step 1: Auto click confirm on Video Tab (Tab 2) first where #btn_check is located
-            for (attempt in 1..4) {
-                secondaryWebViewRef?.evaluateJavascript(AvisoTaskParser.JS_AUTO_WORK_CLICK_CONFIRM, null)
-                secondaryWebViewRef?.evaluateJavascript(AvisoTaskParser.JS_START_AND_WATCH_VIDEO, null)
-                delay(600L)
-            }
-
-            // Step 2: Return to previous tab (Tab 1) and close Video Tab
+            // Step 1: Return to previous tab (Tab 1) and close Video Tab
             viewModel.closeVideoTab()
             viewModel.selectTab(0)
 
-            // Step 3: Wait 1.2s for Tab 1 to gain focus and click confirm on main WebView (Tab 1)
-            delay(1200L)
+            // Step 2: Wait 1.5s for Tab 1 to gain focus and render "Подтвердить просмотр" / Russian confirm button
+            delay(1500L)
+
+            // Step 3: Run confirm click on main WebView (Tab 1) where the link was clicked
             for (attempt in 1..8) {
                 webViewRef?.evaluateJavascript(AvisoTaskParser.JS_AUTO_WORK_CLICK_CONFIRM, null)
-                webViewRef?.evaluateJavascript(AvisoTaskParser.JS_START_AND_WATCH_VIDEO, null)
-                delay(700L)
+                delay(600L)
             }
 
             Toast.makeText(context, "🎬 ভিডিও দেখা সম্পন্ন ও কনফার্ম করা হয়েছে ✓", Toast.LENGTH_SHORT).show()
@@ -648,38 +633,10 @@ fun AvisoBrowserScreen(
 
             // Step 2: Active Video Watching & Background Countdown Loop in Tab 2
             var remainingSec = totalDurationWithBuffer
+            taskCompletedSignal = false
+            confirmClickedSignal = false
 
-            while (uiState.isAutoWorkRunning) {
-                if (taskCompletedSignal || confirmClickedSignal) {
-                    break
-                }
-
-                if (realInterstitialDurationSignal != null && realInterstitialDurationSignal!! > taskDuration) {
-                    val newDur = realInterstitialDurationSignal!!
-                    if (newDur > taskDuration) {
-                        val diff = newDur - taskDuration
-                        remainingSec += diff
-                        taskDuration = newDur
-                        totalDurationWithBuffer = newDur + 1
-                    }
-                }
-
-                // Sync with real timer from DOM if available
-                if (realTimerSecondsSignal > 0) {
-                    remainingSec = realTimerSecondsSignal
-                    if (realTimerSecondsSignal > totalDurationWithBuffer) {
-                        totalDurationWithBuffer = realTimerSecondsSignal
-                    }
-                } else if (realTimerSecondsSignal == 0) {
-                    remainingSec = 0
-                } else {
-                    remainingSec--
-                }
-
-                // Continuously execute watcher on secondary WebView (Tab 2) and main WebView
-                secondaryWebViewRef?.evaluateJavascript(AvisoTaskParser.JS_START_AND_WATCH_VIDEO, null)
-                webViewRef?.evaluateJavascript(AvisoTaskParser.JS_START_AND_WATCH_VIDEO, null)
-
+            while (uiState.isAutoWorkRunning && remainingSec > 0) {
                 // Update countdown display in UI for both Auto Work and Video Tab
                 viewModel.updateAutoWorkCountdown(remainingSec, totalDurationWithBuffer)
                 viewModel.updateVideoTabCountdown(remainingSec, totalDurationWithBuffer)
@@ -687,11 +644,11 @@ fun AvisoBrowserScreen(
                 // Show live background notification in Android status bar
                 AvisoNotificationHelper.showAutoWorkProgressNotification(context, remainingSec, totalDurationWithBuffer)
 
-                if (remainingSec <= 0 && realTimerSecondsSignal <= 0) {
-                    break
-                }
+                // Continuously keep video playing
+                secondaryWebViewRef?.evaluateJavascript(AvisoTaskParser.JS_START_AND_WATCH_VIDEO, null)
 
                 delay(1000L)
+                remainingSec--
             }
 
             if (!uiState.isAutoWorkRunning) {
@@ -705,31 +662,22 @@ fun AvisoBrowserScreen(
             bringAppToFront(context)
             AvisoNotificationHelper.sendAutoWorkFinishedNotification(context)
 
-            // Step 3a: Auto click confirm on Video Tab (Tab 2) first where #btn_check is located
-            viewModel.setAutoWorkStatus("ভিডিও পেজে কনফার্ম (Confirm View) করা হচ্ছে...")
-            for (attempt in 1..4) {
-                secondaryWebViewRef?.evaluateJavascript(AvisoTaskParser.JS_AUTO_WORK_CLICK_CONFIRM, null)
-                secondaryWebViewRef?.evaluateJavascript(AvisoTaskParser.JS_START_AND_WATCH_VIDEO, null)
-                delay(600L)
-            }
-
-            // Step 3b: Return to previous tab (Tab 1) and close Tab 2
+            // Return to previous tab (Tab 1) immediately and close Tab 2
             if (uiState.isVideoTabOpen) {
                 viewModel.setAutoWorkStatus("ভিডিও দেখা শেষ! আগের ট্যাবে ফিরে যাওয়া হচ্ছে...")
                 viewModel.closeVideoTab()
                 viewModel.selectTab(0)
-                delay(1200L) // Allow Tab 1 to regain focus and render confirm button
+                delay(1500L) // Allow Tab 1 to regain focus and render confirm button
             } else {
-                delay(800L)
+                delay(1000L)
             }
 
-            // Step 4: Now click Confirm on previous tab (Tab 1)
+            // Step 4: Now click Confirm on previous tab (Tab 1) where the task link was clicked
             viewModel.setAutoWorkStatus("আগের ট্যাবে টাস্ক নিশ্চিতকরণ (Confirm View) করা হচ্ছে...")
             var isConfirmed = false
             for (attempt in 1..8) {
                 webViewRef?.evaluateJavascript(AvisoTaskParser.JS_AUTO_WORK_CLICK_CONFIRM, null)
-                webViewRef?.evaluateJavascript(AvisoTaskParser.JS_START_AND_WATCH_VIDEO, null)
-                delay(700L)
+                delay(600L)
                 if (taskCompletedSignal || confirmClickedSignal) {
                     isConfirmed = true
                     break

@@ -142,6 +142,12 @@ object AvisoTaskParser {
     const val JS_SETUP_OVERRIDE = """
         (function() {
             try {
+                window._avisoLastExtractedSec = 0;
+                window._avisoLastTaskRow = null;
+                window._avisoLastTaskId = '';
+                window._avisoLastTaskLink = null;
+                window._avisoLastClickCoords = null;
+
                 function resolveFullUrl(u) {
                     if (!u) return '';
                     try {
@@ -155,20 +161,64 @@ object AvisoTaskParser {
 
                 function extractDur(el) {
                     try {
-                        var row = el.closest ? (el.closest('tr') || el.closest('.work-serf') || el.closest('.task-item') || el.closest('div')) : null;
-                        var txt = (row ? row.innerText : '') || (document.body ? document.body.innerText : '') || '';
-                        var mS = txt.match(/(\d+)\s*(?:сек|sec|секунд)/i);
-                        if (mS) return parseInt(mS[1], 10) || 20;
-                        var mM = txt.match(/(\d+)\s*(?:min|минут)/i);
-                        if (mM) return (parseInt(mM[1], 10) || 1) * 60;
+                        var row = el ? (el.closest ? (el.closest('tr') || el.closest('.work-serf') || el.closest('.task-item') || el.closest('[id^="adv_"]') || el.closest('[id^="task_"]') || el.closest('[id^="bl_"]') || el.closest('div')) : null) : null;
+                        if (row) {
+                            // 1. Check rightmost columns / cells / badges where time is displayed
+                            var rightCols = row.querySelectorAll('td:last-child, td:nth-last-child(2), td:nth-child(3), td:nth-child(4), span.badge, span.time, .task-time, .work-time, [class*="time"], [class*="sec"], [class*="count"]');
+                            for (var c = 0; c < rightCols.length; c++) {
+                                var cTxt = (rightCols[c].innerText || rightCols[c].textContent || '').trim();
+                                var cMatch = cTxt.match(/(\d+)\s*(?:сек|sec|секунд|с\b|s\b)/i);
+                                if (cMatch) {
+                                    var num = parseInt(cMatch[1], 10);
+                                    if (num > 0 && num <= 600) return num;
+                                }
+                            }
+
+                            // 2. Check full row text
+                            var txt = (row.innerText || row.textContent || '');
+                            var mS = txt.match(/(\d+)\s*(?:сек|sec|секунд|с\b|s\b)/i);
+                            if (mS) {
+                                var sNum = parseInt(mS[1], 10);
+                                if (sNum > 0 && sNum <= 600) return sNum;
+                            }
+                            var mM = txt.match(/(\d+)\s*(?:min|минут|m\b)/i);
+                            if (mM) {
+                                var mNum = parseInt(mM[1], 10);
+                                if (mNum > 0 && mNum <= 30) return mNum * 60;
+                            }
+                        }
                     } catch(e) {}
-                    return 20;
+                    return window._avisoLastExtractedSec || 20;
                 }
+
+                // Global click listener to always capture the exact task row, click coordinates, and duration
+                document.addEventListener('click', function(e) {
+                    try {
+                        var el = e.target;
+                        if (!el) return;
+                        var row = el.closest ? (el.closest('tr') || el.closest('.work-serf') || el.closest('.task-item') || el.closest('[id^="adv_"]') || el.closest('[id^="task_"]') || el.closest('[id^="bl_"]') || el.closest('div')) : null;
+                        if (row) {
+                            window._avisoLastTaskRow = row;
+                            window._avisoLastTaskId = row.id || row.getAttribute('id') || row.getAttribute('data-task-id') || row.getAttribute('data-id') || '';
+                            window._avisoLastTaskLink = el;
+
+                            try {
+                                var rect = el.getBoundingClientRect();
+                                window._avisoLastClickCoords = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+                            } catch(err) {}
+
+                            var parsedSec = extractDur(el);
+                            if (parsedSec && parsedSec > 0) {
+                                window._avisoLastExtractedSec = parsedSec;
+                            }
+                        }
+                    } catch(err) {}
+                }, true);
 
                 function handleOpenUrl(url, duration) {
                     if (!url || url === 'about:blank' || url.indexOf('javascript:') === 0) return;
                     var fullUrl = resolveFullUrl(url);
-                    var dur = duration || 20;
+                    var dur = duration || window._avisoLastExtractedSec || 20;
                     if (window.AvisoBridge && window.AvisoBridge.openNewTab) {
                         window.AvisoBridge.openNewTab(fullUrl, dur);
                     } else {
@@ -176,20 +226,30 @@ object AvisoTaskParser {
                     }
                 }
 
-                // Override window.open to delegate to Tab system
+                // Override window.open to delegate to Tab system with dynamic task duration
                 window.open = function(url, target, features) {
                     if (url && url !== 'about:blank') {
-                        handleOpenUrl(url, 20);
+                        var dynamicDur = window._avisoLastExtractedSec || 20;
+                        handleOpenUrl(url, dynamicDur);
                     }
                     return {
                         closed: false,
                         close: function() {},
                         focus: function() {},
                         location: {
-                            set href(val) { handleOpenUrl(val, 20); },
+                            set href(val) { 
+                                var dDur = window._avisoLastExtractedSec || 20;
+                                handleOpenUrl(val, dDur); 
+                            },
                             get href() { return window.location.href; },
-                            replace: function(val) { handleOpenUrl(val, 20); },
-                            assign: function(val) { handleOpenUrl(val, 20); }
+                            replace: function(val) { 
+                                var dDur = window._avisoLastExtractedSec || 20;
+                                handleOpenUrl(val, dDur); 
+                            },
+                            assign: function(val) { 
+                                var dDur = window._avisoLastExtractedSec || 20;
+                                handleOpenUrl(val, dDur); 
+                            }
                         },
                         document: {
                             write: function() {},
@@ -215,22 +275,32 @@ object AvisoTaskParser {
 
                 function extractDur(el) {
                     try {
-                        var row = el ? (el.closest ? (el.closest('tr') || el.closest('.work-serf') || el.closest('.task-item') || el.closest('[id^="adv_"]') || el.closest('[id^="task_"]') || el.closest('div')) : null) : null;
+                        var row = el ? (el.closest ? (el.closest('tr') || el.closest('.work-serf') || el.closest('.task-item') || el.closest('[id^="adv_"]') || el.closest('[id^="task_"]') || el.closest('[id^="bl_"]') || el.closest('div')) : null) : null;
                         if (row) {
                             // Look at right-side columns, badges, or spans first
-                            var rightCol = row.querySelector('td:last-child, td:nth-child(3), td:nth-child(4), span.badge, span.time, .task-time, .work-time, [class*="time"], [class*="sec"]');
-                            if (rightCol) {
-                                var rmS = (rightCol.innerText || rightCol.textContent || '').match(/(\d+)\s*(?:сек|sec|секунд|s\b)/i);
-                                if (rmS) return parseInt(rmS[1], 10) || 20;
+                            var rightCols = row.querySelectorAll('td:last-child, td:nth-last-child(2), td:nth-child(3), td:nth-child(4), span.badge, span.time, .task-time, .work-time, [class*="time"], [class*="sec"], [class*="count"]');
+                            for (var rc = 0; rc < rightCols.length; rc++) {
+                                var rcTxt = (rightCols[rc].innerText || rightCols[rc].textContent || '').trim();
+                                var rmS = rcTxt.match(/(\d+)\s*(?:сек|sec|секунд|с\b|s\b)/i);
+                                if (rmS) {
+                                    var n = parseInt(rmS[1], 10);
+                                    if (n > 0 && n <= 600) return n;
+                                }
                             }
                             var txt = (row ? (row.innerText || row.textContent) : '') || '';
-                            var mS = txt.match(/(\d+)\s*(?:сек|sec|секунд|s\b)/i);
-                            if (mS) return parseInt(mS[1], 10) || 20;
+                            var mS = txt.match(/(\d+)\s*(?:сек|sec|секунд|с\b|s\b)/i);
+                            if (mS) {
+                                var sn = parseInt(mS[1], 10);
+                                if (sn > 0 && sn <= 600) return sn;
+                            }
                             var mM = txt.match(/(\d+)\s*(?:min|минут|m\b)/i);
-                            if (mM) return (parseInt(mM[1], 10) || 1) * 60;
+                            if (mM) {
+                                var mn = parseInt(mM[1], 10);
+                                if (mn > 0 && mn <= 30) return mn * 60;
+                            }
                         }
                     } catch(e) {}
-                    return 20;
+                    return window._avisoLastExtractedSec || 20;
                 }
 
                 // Clean, reliable click helper
@@ -240,6 +310,9 @@ object AvisoTaskParser {
                     var aTag = (el.tagName === 'A') ? el : (el.closest ? el.closest('a') : null);
                     var href = (aTag ? aTag.getAttribute('href') : null) || el.getAttribute('href');
                     var dur = extractDur(el);
+                    if (dur && dur > 0) {
+                        window._avisoLastExtractedSec = dur;
+                    }
 
                     // Track clicked task element, row, and exact coordinates
                     var parentRow = el.closest ? (el.closest('tr') || el.closest('.work-serf') || el.closest('.task-item') || el.closest('[id^="adv_"]') || el.closest('[id^="task_"]')) : null;
@@ -327,9 +400,9 @@ object AvisoTaskParser {
                     if (mMS) return (parseInt(mMS[1], 10) || 0) * 60 + (parseInt(mMS[2], 10) || 0);
                     var mM = t.match(/(\d+)\s*(?:minute|min|минут)[s]?/i);
                     if (mM) return (parseInt(mM[1], 10) || 0) * 60;
-                    var mS = t.match(/(\d+)\s*(?:сек|sec|секунд)/i);
-                    if (mS) return parseInt(mS[1], 10) || 10;
-                    return 10;
+                    var mS = t.match(/(\d+)\s*(?:сек|sec|секунд|с\b|s\b)/i);
+                    if (mS) return parseInt(mS[1], 10) || 20;
+                    return window._avisoLastExtractedSec || 20;
                 }
 
                 // 2. Check if a genuine visible captcha block exists
@@ -842,34 +915,6 @@ object AvisoTaskParser {
 
                 if (window.AvisoBridge && window.AvisoBridge.onRealTimerUpdate) {
                     window.AvisoBridge.onRealTimerUpdate(realSec);
-                }
-
-                // 5. Check for "Подтвердить просмотр" (Confirm View) or "Забрать награду" across all frames
-                for (var d3 = 0; d3 < docs.length; d3++) {
-                    var cDoc = docs[d3];
-                    var confirmBtns = cDoc.querySelectorAll('#btn_check, #btn-check, .btn_confirm, .btn-success, .btn_success, [id*="confirm"], [id*="check"], button, a, input[type="button"], input[type="submit"], span, div');
-                    for (var cb = 0; cb < confirmBtns.length; cb++) {
-                        var cEl = confirmBtns[cb];
-                        if (isConfirmBtn(cEl)) {
-                            // Scroll button into clear view and click immediately
-                            try { cEl.scrollIntoView({ behavior: 'instant', block: 'center' }); } catch(e) {}
-                            safeClick(cEl);
-                            if (window.AvisoBridge && window.AvisoBridge.onAutoWorkConfirmClicked) {
-                                window.AvisoBridge.onAutoWorkConfirmClicked(true);
-                            }
-                            if (window.AvisoBridge && window.AvisoBridge.onTaskCompleted) {
-                                window.AvisoBridge.onTaskCompleted();
-                            }
-                            return;
-                        }
-                    }
-                }
-
-                // 6. Check if task completed text is shown across all frames
-                if (textLower.indexOf('засчитан') !== -1 || textLower.indexOf('начислено') !== -1 || textLower.indexOf('получили') !== -1) {
-                    if (window.AvisoBridge && window.AvisoBridge.onTaskCompleted) {
-                        window.AvisoBridge.onTaskCompleted();
-                    }
                 }
             } catch(e) {
                 if (window.AvisoBridge && window.AvisoBridge.onError) {
