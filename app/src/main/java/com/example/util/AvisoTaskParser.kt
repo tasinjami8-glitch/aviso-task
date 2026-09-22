@@ -455,120 +455,54 @@ object AvisoTaskParser {
                 window._avisoVideoPlayTriggered = false;
                 window._avisoVideoPositionReported = false;
 
-                function parseExactDuration(el, rawText) {
+                function extractSecondsFromTask(rowOrEl, textOverride) {
                     try {
-                        var row = el ? (el.closest ? (el.closest('tr') || el.closest('.work-serf') || el.closest('.task-item') || el.closest('[id^="adv_"]') || el.closest('[id^="task_"]') || el.closest('[id^="bl_"]') || el.closest('div')) : null) : null;
+                        var str = (textOverride || (rowOrEl ? (rowOrEl.innerText || rowOrEl.textContent || '') : '')) || '';
                         
-                        function parseFromStr(str) {
-                            if (!str) return 0;
-                            var s = str.toString().trim();
-                            if (!s) return 0;
-
-                            // 1. Min + Sec (e.g. "1 мин 30 сек", "1 min 20 sec", "1m 30s")
-                            var mMS = s.match(/(\d+)\s*(?:мин|минут|min|minute|m)[\s.,]+(\d+)\s*(?:сек|секунд|sec|second|s|с|c|cek)/i);
-                            if (mMS) {
-                                var mn = parseInt(mMS[1], 10) || 0;
-                                var sc = parseInt(mMS[2], 10) || 0;
-                                var total = mn * 60 + sc;
-                                if (total >= 3 && total <= 1800) return total;
-                            }
-
-                            // 2. Clock format "01:30", "00:20", "0:05", "00:05"
-                            var mClock = s.match(/\b(\d{1,2}):(\d{2})\b/);
-                            if (mClock) {
-                                var cMin = parseInt(mClock[1], 10) || 0;
-                                var cSec = parseInt(mClock[2], 10) || 0;
-                                var cTotal = cMin * 60 + cSec;
-                                if (cTotal >= 3 && cTotal <= 1800) return cTotal;
-                            }
-
-                            // 3. Seconds with various suffixes: "5 сек", "10 сек.", "20 секунд", "15с", "5 с", "10 sec", "20 secs", "5s", "10s", "20s", "5 cek", "10 cek", "20 cek"
-                            var mS = s.match(/(\d+)\s*(?:сек|секунд|секунды|секунда|sec|secs|second|seconds|cek|с|s|c)(?:[^\w\dа-яА-ЯёЁ]|$)/i);
-                            if (mS) {
-                                var valS = parseInt(mS[1], 10) || 0;
-                                if (valS >= 3 && valS <= 1800) return valS;
-                            }
-
-                            // 4. Minutes: "1 мин", "2 минуты", "1 min", "2 mins"
-                            var mM = s.match(/(\d+)\s*(?:мин|минут|минуты|минута|min|mins|minute|minutes)(?:[^\w\dа-яА-ЯёЁ]|$)/i);
-                            if (mM) {
-                                var valM = parseInt(mM[1], 10) || 0;
-                                if (valM >= 1 && valM <= 60) return valM * 60;
-                            }
-
-                            // 5. Standalone number inside a dedicated time cell/badge (e.g. "5", "10", "15", "20", "30", "60", "90", "120")
-                            var mPure = s.match(/^\s*(\d{1,3})\s*$/);
-                            if (mPure) {
-                                var pureNum = parseInt(mPure[1], 10) || 0;
-                                if (pureNum >= 3 && pureNum <= 600) return pureNum;
-                            }
-
-                            return 0;
+                        // 1. Min + Sec (e.g. "1 мин 30 сек", "1 min 20 sec")
+                        var mMS = str.match(/(\d+)\s*(?:мин|минут|min|m)[\s.,]+(\d+)\s*(?:сек|секунд|sec|s|c|cek)/i);
+                        if (mMS) {
+                            var mn = parseInt(mMS[1], 10) || 0;
+                            var sc = parseInt(mMS[2], 10) || 0;
+                            var tot = mn * 60 + sc;
+                            if (tot >= 3 && tot <= 1800) return tot;
                         }
 
-                        var candidates = [];
-                        if (el) candidates.push(el);
-                        if (row) {
-                            var allElements = row.querySelectorAll('td, th, span, div, b, font, [class*="time"], [class*="sec"], [class*="timer"], [class*="badge"], [data-sec], [data-time], [data-timer]');
-                            for (var i = allElements.length - 1; i >= 0; i--) {
-                                candidates.push(allElements[i]);
-                            }
-                            candidates.push(row);
+                        // 2. Exact seconds match (e.g. "10 сек", "5 сек", "20 сек", "15с", "10 sec", "5 cek", "10 cek", "20 cek", "30с", "10s", "5s")
+                        var mS = str.match(/(\d+)\s*(?:сек|секунд|секунды|секунда|sec|secs|second|seconds|cek|с|s|c)\b/i) ||
+                                 str.match(/(\d+)\s*(?:сек|секунд|секунды|секунда|sec|secs|second|seconds|cek|с|s|c)/i);
+                        if (mS) {
+                            var valS = parseInt(mS[1], 10) || 0;
+                            if (valS >= 3 && valS <= 1800) return valS;
                         }
 
-                        for (var c = 0; c < candidates.length; c++) {
-                            var cand = candidates[c];
-                            if (!cand) continue;
+                        // 3. Minutes only: "1 мин", "2 мин", "1 min"
+                        var mM = str.match(/(\d+)\s*(?:мин|минут|минуты|минута|min|mins)(?:[^\w\dа-яА-ЯёЁ]|$)/i);
+                        if (mM) {
+                            var valM = parseInt(mM[1], 10) || 0;
+                            if (valM >= 1 && valM <= 60) return valM * 60;
+                        }
 
-                            var dSec = cand.getAttribute ? (cand.getAttribute('data-sec') || cand.getAttribute('data-time') || cand.getAttribute('data-timer') || cand.getAttribute('data-duration') || cand.getAttribute('data-seconds')) : null;
+                        // 4. Data attributes
+                        if (rowOrEl && rowOrEl.getAttribute) {
+                            var dSec = rowOrEl.getAttribute('data-sec') || rowOrEl.getAttribute('data-time') || rowOrEl.getAttribute('data-timer') || rowOrEl.getAttribute('data-duration');
                             if (dSec) {
-                                var n1 = parseInt(dSec, 10);
-                                if (n1 >= 3 && n1 <= 1800) return n1;
+                                var dVal = parseInt(dSec, 10);
+                                if (dVal >= 3 && dVal <= 1800) return dVal;
                             }
-
-                            var tAttr = cand.getAttribute ? cand.getAttribute('title') : null;
-                            if (tAttr) {
-                                var n2 = parseFromStr(tAttr);
-                                if (n2 > 0) return n2;
-                            }
-
-                            var ocAttr = cand.getAttribute ? cand.getAttribute('onclick') : null;
-                            if (ocAttr) {
-                                var mOc = ocAttr.match(/(?:start|youtube|watch|session|vl|view|func)[^(]*\(\s*[^,)]*,\s*(\d+)/i) ||
-                                          ocAttr.match(/(?:start|youtube|watch|session|vl|view|func)[^(]*\(\s*(\d+)\s*\)/i);
-                                if (mOc) {
-                                    var n3 = parseInt(mOc[1], 10);
-                                    if (n3 >= 3 && n3 <= 1800) return n3;
-                                }
-                            }
-
-                            var txt = (cand.innerText || cand.textContent || '').trim();
-                            if (txt) {
-                                var n4 = parseFromStr(txt);
-                                if (n4 > 0) return n4;
-                            }
-                        }
-
-                        if (rawText) {
-                            var nRaw = parseFromStr(rawText);
-                            if (nRaw > 0) return nRaw;
-                        }
-                        if (row) {
-                            var nRow = parseFromStr(row.innerText || row.textContent || '');
-                            if (nRow > 0) return nRow;
                         }
                     } catch(e) {}
-                    return 0;
+                    return 10;
                 }
 
                 function extractDur(el) {
-                    var d = parseExactDuration(el);
-                    return (d && d > 0) ? d : (window._avisoLastExtractedSec || 15);
+                    var d = extractSecondsFromTask(el);
+                    return (d && d > 0) ? d : (window._avisoLastExtractedSec || 10);
                 }
 
                 function extractDurationFromRow(rowEl, text) {
-                    var d = parseExactDuration(rowEl, text);
-                    return (d && d > 0) ? d : 15;
+                    var d = extractSecondsFromTask(rowEl, text);
+                    return (d && d > 0) ? d : 10;
                 }
 
                 // Clean, reliable click helper
@@ -1299,28 +1233,70 @@ object AvisoTaskParser {
                     if (!el) return false;
                     try { el.scrollIntoView({ behavior: 'instant', block: 'center' }); } catch(e) {}
                     try { el.focus(); } catch(e) {}
+
+                    // 1. Highlight visually
+                    try {
+                        el.style.outline = '4px solid #22c55e';
+                        el.style.boxShadow = '0 0 25px rgba(34, 197, 94, 0.9)';
+                        el.style.borderRadius = '8px';
+                        el.style.backgroundColor = 'rgba(34, 197, 94, 0.3)';
+                    } catch(e) {}
+
+                    // 2. Direct onclick property execution
+                    try {
+                        if (typeof el.onclick === 'function') {
+                            el.onclick.call(el, { target: el, currentTarget: el, preventDefault: function(){}, stopPropagation: function(){} });
+                        }
+                    } catch(e) {}
+
+                    // 3. Evaluate onclick attribute string in window scope
+                    try {
+                        var oc = el.getAttribute ? el.getAttribute('onclick') : null;
+                        if (oc) {
+                            var cleanOc = oc.replace(/^javascript:/i, '').replace(/;\s*return\s+false\s*;?/i, '');
+                            window.eval(cleanOc);
+                        }
+                    } catch(e) {}
+
+                    // 4. Native click()
+                    try { el.click(); } catch(e) {}
+
+                    // 5. Full Mouse & Pointer & Touch Event dispatch
                     try {
                         var rect = el.getBoundingClientRect();
                         var cx = (rect.left + rect.width / 2) || 100;
                         var cy = (rect.top + rect.height / 2) || 100;
                         var opts = { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy };
+
+                        try {
+                            var touchObj = new Touch({ identifier: Date.now(), target: el, clientX: cx, clientY: cy, pageX: cx, pageY: cy });
+                            el.dispatchEvent(new TouchEvent('touchstart', { cancelable: true, bubbles: true, touches: [touchObj], targetTouches: [touchObj], changedTouches: [touchObj] }));
+                            el.dispatchEvent(new TouchEvent('touchend', { cancelable: true, bubbles: true, touches: [], targetTouches: [], changedTouches: [touchObj] }));
+                        } catch(te) {}
+
                         el.dispatchEvent(new PointerEvent('pointerdown', opts));
                         el.dispatchEvent(new MouseEvent('mousedown', opts));
                         el.dispatchEvent(new PointerEvent('pointerup', opts));
                         el.dispatchEvent(new MouseEvent('mouseup', opts));
                         el.dispatchEvent(new MouseEvent('click', opts));
                     } catch(e) {}
-                    try { el.click(); } catch(e) {}
-                    var aParent = el.closest ? el.closest('a, button') : null;
-                    if (aParent && aParent !== el) {
-                        try { aParent.click(); } catch(e) {}
+
+                    // 6. Click parents (e.g. <a>, <button>, <span>, <tr>)
+                    var cur = el.parentElement;
+                    var levels = 0;
+                    while (cur && levels < 4) {
+                        try { cur.click(); } catch(e) {}
+                        if (typeof cur.onclick === 'function') {
+                            try { cur.onclick.call(cur, { target: cur, currentTarget: cur, preventDefault: function(){}, stopPropagation: function(){} }); } catch(e) {}
+                        }
+                        var pOc = cur.getAttribute ? cur.getAttribute('onclick') : null;
+                        if (pOc) {
+                            try { window.eval(pOc.replace(/^javascript:/i, '').replace(/;\s*return\s+false\s*;?/i, '')); } catch(e) {}
+                        }
+                        cur = cur.parentElement;
+                        levels++;
                     }
-                    if (el.getAttribute && el.getAttribute('onclick')) {
-                        try {
-                            var fn = new Function(el.getAttribute('onclick'));
-                            fn.call(el);
-                        } catch(e) {}
-                    }
+
                     return true;
                 }
 
@@ -1666,19 +1642,44 @@ object AvisoTaskParser {
                 var highlightTarget = btn || targetCell || targetRow;
 
                 if (highlightTarget) {
-                    try { highlightTarget.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch(e) {}
+                    try { highlightTarget.scrollIntoView({ behavior: 'instant', block: 'center' }); } catch(e) {}
                     
                     highlightTarget.style.outline = '4px solid #22c55e';
                     highlightTarget.style.boxShadow = '0 0 25px rgba(34, 197, 94, 0.9)';
                     highlightTarget.style.borderRadius = '8px';
                     highlightTarget.style.transition = 'all 0.3s ease-in-out';
-                    highlightTarget.style.backgroundColor = 'rgba(34, 197, 94, 0.15)';
+                    highlightTarget.style.backgroundColor = 'rgba(34, 197, 94, 0.25)';
                     highlightTarget.setAttribute('title', 'Viewing completed! Click to confirm.');
 
                     if (targetRow && targetRow !== highlightTarget) {
                         targetRow.style.backgroundColor = 'rgba(34, 197, 94, 0.08)';
                         targetRow.style.borderLeft = '6px solid #22c55e';
                     }
+
+                    // Also immediately execute click on the target element
+                    try {
+                        if (typeof highlightTarget.onclick === 'function') {
+                            highlightTarget.onclick.call(highlightTarget, { target: highlightTarget, currentTarget: highlightTarget, preventDefault: function(){}, stopPropagation: function(){} });
+                        }
+                    } catch(e) {}
+                    try {
+                        var oc = highlightTarget.getAttribute ? highlightTarget.getAttribute('onclick') : null;
+                        if (oc) {
+                            window.eval(oc.replace(/^javascript:/i, '').replace(/;\s*return\s+false\s*;?/i, ''));
+                        }
+                    } catch(e) {}
+                    try { highlightTarget.click(); } catch(e) {}
+                    try {
+                        var r = highlightTarget.getBoundingClientRect();
+                        var cx = (r.left + r.width / 2) || 100;
+                        var cy = (r.top + r.height / 2) || 100;
+                        var opts = { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy };
+                        highlightTarget.dispatchEvent(new PointerEvent('pointerdown', opts));
+                        highlightTarget.dispatchEvent(new MouseEvent('mousedown', opts));
+                        highlightTarget.dispatchEvent(new PointerEvent('pointerup', opts));
+                        highlightTarget.dispatchEvent(new MouseEvent('mouseup', opts));
+                        highlightTarget.dispatchEvent(new MouseEvent('click', opts));
+                    } catch(e) {}
                 }
             } catch(e) {}
         })();
