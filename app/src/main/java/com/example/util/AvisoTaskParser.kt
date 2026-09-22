@@ -787,25 +787,35 @@ object AvisoTaskParser {
                     }
                 }
 
-                // 4. Read Real Aviso Countdown Timer across all frames
+                // 4. Read Real Aviso Countdown Timer across all frames & document.title
                 var realSec = -1;
-                for (var d2 = 0; d2 < docs.length; d2++) {
-                    var curDoc = docs[d2];
-                    var timerEls = curDoc.querySelectorAll('#tmr, #timer, .timer, #sec, span[id*="tmr"], span[id*="time"], div[id*="timer"], .time_block, .time-count');
-                    for (var t = 0; t < timerEls.length; t++) {
-                        var txt = (timerEls[t].innerText || '').trim();
-                        var m = txt.match(/(\d+)/);
-                        if (m) {
-                            realSec = parseInt(m[1], 10);
+
+                // Check document.title (Aviso updates title e.g. "20 сек - Просмотр" or "15 sec")
+                var docTitle = (document.title || '');
+                var mTitle = docTitle.match(/^(\d+)\s*(?:сек|sec|s\b)/i) || docTitle.match(/(\d+)\s*(?:сек|sec|s\b)/i);
+                if (mTitle) {
+                    realSec = parseInt(mTitle[1], 10);
+                }
+
+                if (realSec === -1) {
+                    for (var d2 = 0; d2 < docs.length; d2++) {
+                        var curDoc = docs[d2];
+                        var timerEls = curDoc.querySelectorAll('#tmr, #timer, .timer, #sec, #sec-time, span[id*="tmr"], span[id*="sec"], span[id*="time"], div[id*="timer"], div[id*="tmr"], div[id*="sec"], .time_block, .time-count, .timer-block, #block-timer, [data-timer], [data-time], .badge-timer');
+                        for (var t = 0; t < timerEls.length; t++) {
+                            var txt = (timerEls[t].innerText || timerEls[t].textContent || '').trim();
+                            var m = txt.match(/^(\d+)$/) || txt.match(/(\d+)/);
+                            if (m) {
+                                realSec = parseInt(m[1], 10);
+                                break;
+                            }
+                        }
+                        if (realSec !== -1) break;
+                        var bTxt = (curDoc.body ? curDoc.body.innerText : '') || '';
+                        var m2 = bTxt.match(/Осталось:\s*(\d+)\s*сек/i) || bTxt.match(/Осталось\s*(\d+)\s*сек/i) || bTxt.match(/Таймер:\s*(\d+)/i) || bTxt.match(/(\d+)\s*сек(?:унд)?/i) || bTxt.match(/(\d+)\s*sec/i);
+                        if (m2) {
+                            realSec = parseInt(m2[1], 10);
                             break;
                         }
-                    }
-                    if (realSec !== -1) break;
-                    var bTxt = (curDoc.body ? curDoc.body.innerText : '') || '';
-                    var m2 = bTxt.match(/Осталось:\s*(\d+)\s*сек/i) || bTxt.match(/(\d+)\s*сек(?:унд)?/i) || bTxt.match(/(\d+)\s*sec/i);
-                    if (m2) {
-                        realSec = parseInt(m2[1], 10);
-                        break;
                     }
                 }
 
@@ -816,7 +826,7 @@ object AvisoTaskParser {
                 // 5. Check for "Подтвердить просмотр" (Confirm View) or "Забрать награду" across all frames
                 for (var d3 = 0; d3 < docs.length; d3++) {
                     var cDoc = docs[d3];
-                    var confirmBtns = cDoc.querySelectorAll('#btn_check, .btn_confirm, [id*="confirm"], [id*="check"], button, a, input[type="button"], span, div');
+                    var confirmBtns = cDoc.querySelectorAll('#btn_check, #btn-check, .btn_confirm, .btn-success, .btn_success, [id*="confirm"], [id*="check"], button, a, input[type="button"], input[type="submit"], span, div');
                     for (var cb = 0; cb < confirmBtns.length; cb++) {
                         var cEl = confirmBtns[cb];
                         if (isConfirmBtn(cEl)) {
