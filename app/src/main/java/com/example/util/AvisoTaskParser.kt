@@ -770,16 +770,18 @@ object AvisoTaskParser {
                     try {
                         ifr.contentWindow.postMessage('{"event":"command","func":"playVideo","args":""}', '*');
                         ifr.contentWindow.postMessage('{"event":"command","func":"unMute","args":""}', '*');
+                        ifr.contentWindow.postMessage('{"event":"listening","id":1,"channel":"widget"}', '*');
                     } catch(e) {}
                 }
 
-                // Click play overlay / button if present
+                // Click play overlay / buttons with full simulated touch & mouse events
                 for (var dPlay = 0; dPlay < docs.length; dPlay++) {
-                    var startButtons = docs[dPlay].querySelectorAll('#video-click, .video-click, #start_video, .start-video, .ytp-large-play-button, button.ytp-large-play-button, .ytp-play-button, button.btn-play, [class*="play_btn"], a[onclick*="start"], button[onclick*="start"]');
+                    var startButtons = docs[dPlay].querySelectorAll('#video-click, .video-click, #start_video, .start-video, .ytp-large-play-button, button.ytp-large-play-button, .ytp-play-button, button.btn-play, [class*="play_btn"], a[onclick*="start"], button[onclick*="start"], .ytp-cuj-button, .video-stream');
                     for (var s = 0; s < startButtons.length; s++) {
                         try {
-                            if (startButtons[s].offsetParent !== null) {
-                                startButtons[s].click();
+                            var btn = startButtons[s];
+                            if (btn && btn.offsetParent !== null) {
+                                safeClick(btn);
                             }
                         } catch(e) {}
                     }

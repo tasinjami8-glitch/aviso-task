@@ -1605,11 +1605,11 @@ fun AvisoBrowserScreen(
                                         loadWithOverviewMode = true
                                         useWideViewPort = true
                                         mediaPlaybackRequiresUserGesture = false
-                                        setSupportMultipleWindows(true)
+                                        setSupportMultipleWindows(false)
                                         javaScriptCanOpenWindowsAutomatically = true
                                         mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                                         cacheMode = WebSettings.LOAD_DEFAULT
-                                        userAgentString = "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36"
+                                        userAgentString = "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.6613.127 Mobile Safari/537.36"
                                     }
 
                                     addJavascriptInterface(
@@ -1670,10 +1670,14 @@ fun AvisoBrowserScreen(
                                     webViewClient = object : WebViewClient() {
                                         override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                                             val url = request?.url?.toString() ?: return false
-                                            if (url.startsWith("intent:") || url.startsWith("vnd.youtube:")) {
+                                            if (url.startsWith("intent:") || url.startsWith("vnd.youtube:") || url.startsWith("market:")) {
                                                 try {
                                                     val intent = Intent.parseUri(url, Intent.URI_INTENT_SCHEME)
-                                                    ctx.startActivity(intent)
+                                                    val fallback = intent.getStringExtra("browser_fallback_url")
+                                                    val target = if (!fallback.isNullOrEmpty()) fallback else intent.dataString
+                                                    if (!target.isNullOrEmpty() && (target.startsWith("http://") || target.startsWith("https://"))) {
+                                                        view?.loadUrl(target)
+                                                    }
                                                 } catch (_: Exception) {}
                                                 return true
                                             }
