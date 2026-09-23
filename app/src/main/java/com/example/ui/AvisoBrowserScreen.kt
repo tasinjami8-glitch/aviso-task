@@ -1792,17 +1792,15 @@ fun AvisoBrowserScreen(
 
                                         override fun onPageFinished(view: WebView?, url: String?) {
                                             view?.evaluateJavascript(AvisoTaskParser.JS_SETUP_OVERRIDE, null)
+                                            view?.evaluateJavascript(AvisoTaskParser.JS_CLICK_START_BUTTON_ON_VIDEO_PAGE, null)
                                             view?.evaluateJavascript(AvisoTaskParser.JS_START_AND_WATCH_VIDEO, null)
                                             view?.postDelayed({
+                                                view.evaluateJavascript(AvisoTaskParser.JS_CLICK_START_BUTTON_ON_VIDEO_PAGE, null)
                                                 view.evaluateJavascript(AvisoTaskParser.JS_START_AND_WATCH_VIDEO, null)
-                                            }, 400L)
+                                            }, 600L)
                                             view?.postDelayed({
                                                 view.evaluateJavascript(AvisoTaskParser.JS_START_AND_WATCH_VIDEO, null)
-                                                view.evaluateJavascript(AvisoTaskParser.JS_AUTO_WORK_CLICK_CONFIRM, null)
-                                            }, 1200L)
-                                            view?.postDelayed({
-                                                view.evaluateJavascript(AvisoTaskParser.JS_START_AND_WATCH_VIDEO, null)
-                                            }, 2200L)
+                                            }, 2000L)
                                         }
 
                                         override fun onReceivedSslError(view: WebView?, handler: SslErrorHandler?, error: SslError?) {

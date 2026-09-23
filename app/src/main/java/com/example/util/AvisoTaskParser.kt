@@ -506,6 +506,10 @@ object AvisoTaskParser {
                     return (d && d > 0) ? d : 0;
                 }
 
+                function extractDuration(text) {
+                    return extractDurationFromRow(null, text);
+                }
+
                 // Clean, reliable click helper for starting video task
                 function safeClick(el) {
                     if (!el) return false;
