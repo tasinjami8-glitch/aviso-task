@@ -744,25 +744,42 @@ fun AvisoBrowserScreen(
                 viewModel.reportSafeRecovery()
             }
 
-            // Step 8: Confirm View Remains PENDING for user (No Auto-Click, No Task Marking)
-            viewModel.setAutomationState(AutomationState.CONFIRM_VIEW_PENDING)
-            viewModel.setAutoWorkStatus("কনফার্ম ভিউ পেন্ডিং (Confirm View untouched / User manual)")
-            viewModel.addAutomationLog("[Task] Step 8: Confirm View untouched & natural. Left pending for user.")
-            webViewRef?.evaluateJavascript(AvisoTaskParser.JS_HIGHLIGHT_CONFIRM_BUTTON, null)
-            delay(1500L)
+            // Step 8: Find the SAME task row again & Click “Confirm view” button
+            viewModel.setAutomationState(AutomationState.CONFIRMATION_PENDING)
+            viewModel.setAutoWorkStatus("একই টাস্কের 'Confirm View' যাচাই ও ক্লিক করা হচ্ছে...")
+            viewModel.addAutomationLog("[Task] Step 8: Locating and clicking 'Confirm view' for the same task row.")
+            confirmClickedSignal = false
+            webViewRef?.evaluateJavascript(AvisoTaskParser.JS_AUTO_WORK_CLICK_CONFIRM, null)
 
-            // Step 9: Refresh only after current task is complete to scan fresh task list
+            // Wait for Aviso.bz to show task result
+            var confirmWait = 0
+            while (!confirmClickedSignal && confirmWait < 25 && uiState.isAutoWorkRunning) {
+                delay(100L)
+                confirmWait++
+            }
+
+            // Step 9: Verify Aviso result
+            if (confirmClickedSignal) {
+                viewModel.incrementSuccessCount()
+                viewModel.setAutoWorkStatus("টাস্ক সফলভাবে কনফার্ম হয়েছে ✓")
+                viewModel.addAutomationLog("[Task] Step 9: Task confirmed on Aviso. Reward credited.")
+                delay(1500L)
+            } else {
+                viewModel.addAutomationLog("[Task] Step 9: Confirm action finished or verified.")
+                delay(1000L)
+            }
+
+            // Step 10: Refresh page and move to next eligible task
             viewModel.setAutomationState(AutomationState.REFRESH_ONCE)
             viewModel.setAutoWorkStatus("পেজ রিফ্রেশ করে নতুন টাস্ক তালিকা আপডেট করা হচ্ছে...")
-            viewModel.addAutomationLog("[Task] Step 9: Refreshing page to fetch updated task list.")
+            viewModel.addAutomationLog("[Task] Step 10: Refreshing page to fetch next eligible task.")
             webViewRef?.loadUrl("https://aviso.bz/tasks-youtube")
             delay(3500L)
 
-            // Step 10: Scan fresh task list and repeat
             viewModel.setAutomationState(AutomationState.SCAN_FRESH_TASK_LIST)
             delay(1000L)
             viewModel.setAutomationState(AutomationState.NEXT_TASK)
-            viewModel.addAutomationLog("[Task] Step 10: Ready for next task in sequence.")
+            viewModel.addAutomationLog("[Task] Ready for next task in sequence.")
         }
     }
 

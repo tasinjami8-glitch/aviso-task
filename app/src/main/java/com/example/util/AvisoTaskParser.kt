@@ -671,9 +671,28 @@ object AvisoTaskParser {
                         continue;
                     }
 
-                    var sec = extractDurationFromRow(row, rText);
+                    // Step 4 & 5: Look at the RIGHT side of the selected task row and read exact viewing time
+                    var sec = 0;
+                    if (row.cells && row.cells.length > 0) {
+                        for (var c = row.cells.length - 1; c >= 0; c--) {
+                            var cellText = (row.cells[c].innerText || row.cells[c].textContent || '').trim();
+                            var parsedS = extractSecondsFromTask(row.cells[c], cellText);
+                            if (parsedS && parsedS > 0) {
+                                sec = parsedS;
+                                break;
+                            }
+                        }
+                    }
+                    if (!sec || sec <= 0) {
+                        sec = extractDurationFromRow(row, rText);
+                    }
 
-                    // Check if row ALREADY has "Приступить к просмотру" visible
+                    // Strict: If timer cannot be read, DO NOT GUESS -> skip this task
+                    if (!sec || sec <= 0) {
+                        continue;
+                    }
+
+                    // Step 6: From the SAME task row, locate the YouTube video link on the LEFT side
                     var rowEls = row.querySelectorAll('button, a, input[type="button"], span, div');
                     for (var re = 0; re < rowEls.length; re++) {
                         if (isStartWatchingBtn(rowEls[re])) {
@@ -682,30 +701,58 @@ object AvisoTaskParser {
                         }
                     }
 
-                    // Look for the clickable task title in row
+                    // Look for the clickable task title/link on the LEFT side of row
                     // (Strictly avoid advertiser user profiles, instructions, complaints, delete)
-                    var links = row.querySelectorAll('a, span[onclick], div[onclick], .title, .task-title, .work-title, a.serf-url');
                     var candidateLink = null;
-                    for (var l = 0; l < links.length; l++) {
-                        var lt = (links[l].innerText || '').trim();
-                        var href = (links[l].getAttribute('href') || '').toLowerCase();
-                        var oc = (links[l].getAttribute('onclick') || '').toLowerCase();
-                        var cls = (links[l].className || '').toString().toLowerCase();
-
-                        if (lt === 'Инструкция' || lt.indexOf('жалоб') !== -1 || href.indexOf('delete') !== -1 ||
-                            href.indexOf('/user') !== -1 || href.indexOf('/profile') !== -1 || href.indexOf('/wm/') !== -1 ||
-                            lt === 'Посмотреть видео') {
-                            continue;
+                    if (row.cells && row.cells.length > 0) {
+                        // Priority search in left-side cells (cells 0, 1)
+                        for (var lc = 0; lc < Math.min(row.cells.length, 3); lc++) {
+                            var leftLinks = row.cells[lc].querySelectorAll('a, span[onclick], div[onclick], .title, .task-title, .work-title, a.serf-url');
+                            for (var ll = 0; ll < leftLinks.length; ll++) {
+                                var lEl = leftLinks[ll];
+                                var lt = (lEl.innerText || '').trim();
+                                var href = (lEl.getAttribute('href') || '').toLowerCase();
+                                var oc = (lEl.getAttribute('onclick') || '').toLowerCase();
+                                if (lt === 'Инструкция' || lt.indexOf('жалоб') !== -1 || href.indexOf('delete') !== -1 ||
+                                    href.indexOf('/user') !== -1 || href.indexOf('/profile') !== -1 || href.indexOf('/wm/') !== -1 ||
+                                    lt === 'Посмотреть видео') {
+                                    continue;
+                                }
+                                candidateLink = lEl;
+                                break;
+                            }
+                            if (candidateLink) break;
                         }
+                    }
 
-                        if (cls.indexOf('serf-url') !== -1 || cls.indexOf('title') !== -1 ||
-                            oc.indexOf('start') !== -1 || oc.indexOf('func') !== -1 ||
-                            href.indexOf('youtube') !== -1 || href.indexOf('youtu.be') !== -1 ||
-                            href.indexOf('/go/') !== -1 || href.indexOf('/vl/') !== -1 ||
-                            lt.length > 2) {
-                            candidateLink = links[l];
-                            break;
+                    if (!candidateLink) {
+                        var links = row.querySelectorAll('a, span[onclick], div[onclick], .title, .task-title, .work-title, a.serf-url');
+                        for (var l = 0; l < links.length; l++) {
+                            var lt = (links[l].innerText || '').trim();
+                            var href = (links[l].getAttribute('href') || '').toLowerCase();
+                            var oc = (links[l].getAttribute('onclick') || '').toLowerCase();
+                            var cls = (links[l].className || '').toString().toLowerCase();
+
+                            if (lt === 'Инструкция' || lt.indexOf('жалоб') !== -1 || href.indexOf('delete') !== -1 ||
+                                href.indexOf('/user') !== -1 || href.indexOf('/profile') !== -1 || href.indexOf('/wm/') !== -1 ||
+                                lt === 'Посмотреть видео') {
+                                continue;
+                            }
+
+                            if (cls.indexOf('serf-url') !== -1 || cls.indexOf('title') !== -1 ||
+                                oc.indexOf('start') !== -1 || oc.indexOf('func') !== -1 ||
+                                href.indexOf('youtube') !== -1 || href.indexOf('youtu.be') !== -1 ||
+                                href.indexOf('/go/') !== -1 || href.indexOf('/vl/') !== -1 ||
+                                lt.length > 2) {
+                                candidateLink = links[l];
+                                break;
+                            }
                         }
+                    }
+
+                    // Strict: If video link is missing and no start button is visible, skip that task!
+                    if (!startBtnAlreadyVisible && !candidateLink) {
+                        continue;
                     }
 
                     if (startBtnAlreadyVisible || candidateLink) {
@@ -1314,127 +1361,76 @@ object AvisoTaskParser {
 
                 var clicked = false;
 
-                // 1. Locate the EXACT task row where the link was clicked
-                var targetRow = (window._avisoLastTaskRow && document.body.contains(window._avisoLastTaskRow)) ? window._avisoLastTaskRow : 
-                                (window._avisoLastTaskId ? document.getElementById(window._avisoLastTaskId) : null);
+                // 1. Strictly locate the SAME task row that was initiated
+                var targetRow = (window._avisoLastTaskId ? document.getElementById(window._avisoLastTaskId) : null) || 
+                                (window._avisoLastTaskRow && document.body.contains(window._avisoLastTaskRow) ? window._avisoLastTaskRow : null);
                 
-                // 2. Locate the EXACT cell / container where the link was located
-                var targetCell = (window._avisoLastTaskCell && document.body.contains(window._avisoLastTaskCell)) ? window._avisoLastTaskCell : null;
-                if (!targetCell && targetRow) {
-                    if (window._avisoLastTaskCellIndex !== undefined && window._avisoLastTaskCellIndex >= 0 && targetRow.cells && targetRow.cells[window._avisoLastTaskCellIndex]) {
+                // If the task row cannot be identified with certainty, DO NOT CLICK!
+                if (!targetRow) {
+                    if (window.AvisoBridge && window.AvisoBridge.onError) {
+                        window.AvisoBridge.onError('Task row could not be identified with certainty. Skipping confirmation click.');
+                    }
+                    if (window.AvisoBridge && window.AvisoBridge.onAutoWorkConfirmClicked) {
+                        window.AvisoBridge.onAutoWorkConfirmClicked(false);
+                    }
+                    return;
+                }
+
+                try { targetRow.scrollIntoView({ behavior: 'instant', block: 'center' }); } catch(e) {}
+
+                // 2. Locate the "Confirm view" button belonging to THAT EXACT task row
+                var rowCandidates = targetRow.querySelectorAll('button, a, input, [role="button"], span[onclick], div[onclick], span, div');
+                var targetConfirmBtn = null;
+                for (var r = 0; r < rowCandidates.length; r++) {
+                    if (isConfirmBtn(rowCandidates[r])) {
+                        targetConfirmBtn = rowCandidates[r];
+                        break;
+                    }
+                }
+
+                // If not found in primary search, check the specific cell where the link was located
+                if (!targetConfirmBtn) {
+                    var targetCell = (window._avisoLastTaskCell && document.body.contains(window._avisoLastTaskCell)) ? window._avisoLastTaskCell : null;
+                    if (!targetCell && window._avisoLastTaskCellIndex !== undefined && targetRow.cells && targetRow.cells[window._avisoLastTaskCellIndex]) {
                         targetCell = targetRow.cells[window._avisoLastTaskCellIndex];
-                    } else {
-                        targetCell = targetRow.querySelector('td:first-child, td:nth-child(2), td, div');
                     }
-                }
-
-                if (targetCell) {
-                    try { targetCell.scrollIntoView({ behavior: 'instant', block: 'center' }); } catch(e) {}
-                    
-                    // (A) Check inside this EXACT cell for confirm button or any active button/link
-                    var cellCandidates = targetCell.querySelectorAll('button, a, input, [role="button"], span[onclick], div[onclick], span, div, strong, b');
-                    
-                    // Priority 1: Named confirm/check button inside this exact cell
-                    for (var c1 = 0; c1 < cellCandidates.length; c1++) {
-                        if (isConfirmBtn(cellCandidates[c1])) {
-                            safeClick(cellCandidates[c1]);
-                            clicked = true;
-                            break;
-                        }
-                    }
-
-                    // Priority 2: Even if confirm view text is not there, click whatever button/link/element is at this EXACT link spot
-                    if (!clicked) {
-                        for (var c2 = 0; c2 < cellCandidates.length; c2++) {
-                            var el2 = cellCandidates[c2];
-                            var tag = el2.tagName.toUpperCase();
-                            var cls = (el2.className || '').toString().toLowerCase();
-                            var oc = (el2.getAttribute('onclick') || '').toLowerCase();
-                            if (tag === 'BUTTON' || tag === 'A' || tag === 'INPUT' || el2.getAttribute('role') === 'button' || cls.indexOf('btn') !== -1 || oc.length > 0 || el2.getAttribute('href')) {
-                                safeClick(el2);
-                                clicked = true;
-                                break;
-                            }
-                        }
-                    }
-
-                    // Priority 3: If no button element, click the first clickable child or targetCell itself
-                    if (!clicked && cellCandidates.length > 0) {
-                        safeClick(cellCandidates[0]);
-                        clicked = true;
-                    } else if (!clicked) {
-                        safeClick(targetCell);
-                        clicked = true;
-                    }
-                }
-
-                // 3. Check element at exact previous click coordinates on screen
-                if (!clicked && window._avisoLastClickCoords && typeof document.elementFromPoint === 'function') {
-                    try {
-                        var elAtPoint = document.elementFromPoint(window._avisoLastClickCoords.x, window._avisoLastClickCoords.y);
-                        if (elAtPoint && elAtPoint !== document.body && elAtPoint !== document.documentElement) {
-                            var clickableAtPoint = (elAtPoint.tagName === 'A' || elAtPoint.tagName === 'BUTTON' || elAtPoint.getAttribute('role') === 'button' || (elAtPoint.className || '').indexOf('btn') !== -1) ? elAtPoint : (elAtPoint.closest ? elAtPoint.closest('a, button, [role="button"], [class*="btn"], td, div') : elAtPoint);
-                            if (clickableAtPoint) {
-                                safeClick(clickableAtPoint);
-                                clicked = true;
-                            }
-                        }
-                    } catch(e) {}
-                }
-
-                // 4. Search ONLY inside this specific targetRow (never anywhere else on the page)
-                if (!clicked && targetRow) {
-                    var rowCandidates = targetRow.querySelectorAll('button, a, input, [role="button"], span[onclick], div[onclick], span, div');
-                    for (var r = 0; r < rowCandidates.length; r++) {
-                        if (isConfirmBtn(rowCandidates[r])) {
-                            safeClick(rowCandidates[r]);
-                            clicked = true;
-                            break;
-                        }
-                    }
-                    if (!clicked && rowCandidates.length > 0) {
-                        for (var r2 = 0; r2 < rowCandidates.length; r2++) {
-                            var rEl = rowCandidates[r2];
-                            var rTag = rEl.tagName.toUpperCase();
-                            if (rTag === 'BUTTON' || rTag === 'A' || rTag === 'INPUT' || (rEl.className || '').indexOf('btn') !== -1) {
-                                safeClick(rEl);
-                                clicked = true;
+                    if (targetCell) {
+                        var cellCandidates = targetCell.querySelectorAll('button, a, input, [role="button"], span[onclick], div[onclick], span, div');
+                        for (var c = 0; c < cellCandidates.length; c++) {
+                            if (isConfirmBtn(cellCandidates[c])) {
+                                targetConfirmBtn = cellCandidates[c];
                                 break;
                             }
                         }
                     }
                 }
 
-                // 5. If the original link element is still in the document, click it
-                if (!clicked && window._avisoLastTaskLink && document.body.contains(window._avisoLastTaskLink)) {
-                    safeClick(window._avisoLastTaskLink);
+                // If still not found, check around the last clicked link container inside this SAME row
+                if (!targetConfirmBtn && window._avisoLastTaskLink && targetRow.contains(window._avisoLastTaskLink)) {
+                    var pEl = window._avisoLastTaskLink.parentElement;
+                    if (pEl) {
+                        var pCandidates = pEl.querySelectorAll('button, a, input, [role="button"]');
+                        for (var pc = 0; pc < pCandidates.length; pc++) {
+                            if (isConfirmBtn(pCandidates[pc])) {
+                                targetConfirmBtn = pCandidates[pc];
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                // 3. Strict Execution: Click ONLY if the button belongs to this exact task
+                if (targetConfirmBtn) {
+                    safeClick(targetConfirmBtn);
                     clicked = true;
-                }
-
-                // 6. GLOBAL FALLBACK: If still not clicked, search all documents and iframes for ANY visible confirm button
-                if (!clicked) {
-                    var allDocs = getAllDocs();
-                    for (var dIdx = 0; dIdx < allDocs.length; dIdx++) {
-                        var cDoc = allDocs[dIdx];
-                        var allDocBtns = cDoc.querySelectorAll('button, a, input[type="button"], span[onclick], div[onclick], span, div, [role="button"]');
-                        for (var ad = 0; ad < allDocBtns.length; ad++) {
-                            var gEl = allDocBtns[ad];
-                            if (isConfirmBtn(gEl) && (gEl.offsetParent !== null || gEl.offsetWidth > 0)) {
-                                safeClick(gEl);
-                                clicked = true;
-                                break;
-                            }
-                        }
-                        if (clicked) break;
+                    if (window.AvisoBridge && window.AvisoBridge.onAutomationLog) {
+                        window.AvisoBridge.onAutomationLog('[Confirm] Clicked Confirm View on the exact same task row.');
                     }
-                }
-
-                if (clicked && window._avisoLastTaskRow) {
-                    try {
-                        window._avisoLastTaskRow.classList.add('task-done');
-                        window._avisoLastTaskRow.setAttribute('data-completed', 'true');
-                        window._avisoLastTaskRow.style.opacity = '0.4';
-                    } catch(e) {}
+                } else {
+                    // NEVER click a different task's “Confirm view”
+                    if (window.AvisoBridge && window.AvisoBridge.onAutomationLog) {
+                        window.AvisoBridge.onAutomationLog('[Safety] Confirm view button could not be matched to this exact task row. Re-checking page safely.');
+                    }
                 }
 
                 if (window.AvisoBridge && window.AvisoBridge.onAutoWorkConfirmClicked) {
