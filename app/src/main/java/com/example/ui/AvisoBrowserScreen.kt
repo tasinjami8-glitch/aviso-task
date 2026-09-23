@@ -657,20 +657,43 @@ fun AvisoBrowserScreen(
             viewModel.setAutoWorkStatus("ইউটিউব ভিডিও ওপেন করা হচ্ছে...")
             viewModel.addAutomationLog("[Task] Step 4: Opening verified YouTube video")
 
-            // Step 4 Verification: Verify YouTube page & video loaded
+            // VIDEO START RULE:
+            // 1. Wait for the page to load.
             viewModel.setAutomationState(AutomationState.VERIFY_VIDEO)
-            delay(1000L)
+            delay(1500L)
 
-            // Step 5: Exact Second Counting dynamically based on current task's duration
-            var taskDuration = (autoWorkTaskStartedSignal?.takeIf { it > 0 } ?: realInterstitialDurationSignal?.takeIf { it > 0 } ?: uiState.videoTabDuration.takeIf { it > 0 } ?: 15).coerceAtLeast(5)
-            var totalDurationWithBuffer = taskDuration + 1 // +1 second buffer
+            // 2. If a visible “Start” button appears, click that Start button.
+            // 3. Do not click unrelated buttons.
+            // 4. If Start does not appear, continue according to existing workflow.
+            // 5. Do not restart the task unnecessarily.
+            val activeVideoTarget = if (uiState.isVideoTabOpen) secondaryWebViewRef else webViewRef
+            activeVideoTarget?.evaluateJavascript(AvisoTaskParser.JS_CLICK_START_BUTTON_ON_VIDEO_PAGE, null)
+            delay(500L)
+
+            // TIMER RULE:
+            // 3. Read ONLY the displayed value containing “Cek” or the task’s displayed duration.
+            // 4. Use that exact value as the countdown duration (no fixed default, no previous timer).
+            // ERROR RULE: If the Cek value cannot be read clearly, STOP and re-check.
+            val taskDuration = autoWorkTaskStartedSignal?.takeIf { it > 0 }
+                ?: realInterstitialDurationSignal?.takeIf { it > 0 }
+                ?: 0
+
+            if (taskDuration <= 0) {
+                viewModel.addAutomationLog("[Timer] 'Cek' duration could not be read clearly for this task. Stopping and re-checking.")
+                viewModel.setAutoWorkStatus("টাস্কের Cek সময় নিশ্চিত নয়, পুনরায় চেক করা হচ্ছে...")
+                webViewRef?.loadUrl("https://aviso.bz/tasks-youtube")
+                delay(3000L)
+                continue
+            }
+
+            val exactCountdownDuration = taskDuration
 
             viewModel.setAutomationState(AutomationState.START_EXACT_TIMER)
-            viewModel.setAutoWorkStatus("ভিডিও দেখা হচ্ছে ($totalDurationWithBuffer সেক)...")
-            viewModel.addAutomationLog("[Timer] Step 5: Starting exact dynamic timer: ${totalDurationWithBuffer}s")
+            viewModel.setAutoWorkStatus("ভিডিও দেখা হচ্ছে ($exactCountdownDuration Cek)...")
+            viewModel.addAutomationLog("[Timer] Step 5: Running exact Cek countdown: ${exactCountdownDuration}s")
 
             // Step 6: Active Video Watching & Background Countdown Loop
-            var remainingSec = totalDurationWithBuffer
+            var remainingSec = exactCountdownDuration
             taskCompletedSignal = false
             confirmClickedSignal = false
 
@@ -681,7 +704,7 @@ fun AvisoBrowserScreen(
                     AvisoNotificationHelper.showAutoWorkProgressNotification(
                         context,
                         remainingSec,
-                        totalDurationWithBuffer,
+                        exactCountdownDuration,
                         isPaused = true
                     )
                     while (uiState.isAutoWorkPaused && uiState.isAutoWorkRunning) {
@@ -692,19 +715,20 @@ fun AvisoBrowserScreen(
                 }
 
                 // Update countdown display in UI for both Auto Work and Video Tab
-                viewModel.updateAutoWorkCountdown(remainingSec, totalDurationWithBuffer)
-                viewModel.updateVideoTabCountdown(remainingSec, totalDurationWithBuffer)
+                viewModel.updateAutoWorkCountdown(remainingSec, exactCountdownDuration)
+                viewModel.updateVideoTabCountdown(remainingSec, exactCountdownDuration)
 
                 // Show live background notification in Android status bar
                 AvisoNotificationHelper.showAutoWorkProgressNotification(
                     context,
                     remainingSec,
-                    totalDurationWithBuffer,
+                    exactCountdownDuration,
                     isPaused = false
                 )
 
                 // Continuously keep video playing
-                secondaryWebViewRef?.evaluateJavascript(AvisoTaskParser.JS_START_AND_WATCH_VIDEO, null)
+                val activeWatchWebView = if (uiState.isVideoTabOpen) secondaryWebViewRef else webViewRef
+                activeWatchWebView?.evaluateJavascript(AvisoTaskParser.JS_START_AND_WATCH_VIDEO, null)
 
                 delay(1000L)
                 remainingSec--
@@ -714,8 +738,8 @@ fun AvisoBrowserScreen(
                 AvisoNotificationHelper.cancelAutoWorkProgressNotification(context)
                 break
             }
-            viewModel.updateAutoWorkCountdown(0, totalDurationWithBuffer)
-            viewModel.updateVideoTabCountdown(0, totalDurationWithBuffer)
+            viewModel.updateAutoWorkCountdown(0, exactCountdownDuration)
+            viewModel.updateVideoTabCountdown(0, exactCountdownDuration)
 
             // Step 6 & 7: Timer Completion & Return to the SAME task
             viewModel.setAutomationState(AutomationState.VIEW_TIME_COMPLETED)

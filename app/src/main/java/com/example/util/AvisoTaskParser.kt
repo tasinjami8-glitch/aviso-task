@@ -459,8 +459,8 @@ object AvisoTaskParser {
                     try {
                         var str = (textOverride || (rowOrEl ? (rowOrEl.innerText || rowOrEl.textContent || '') : '')) || '';
                         
-                        // 1. Min + Sec (e.g. "1 мин 30 сек", "1 min 20 sec")
-                        var mMS = str.match(/(\d+)\s*(?:мин|минут|min|m)[\s.,]+(\d+)\s*(?:сек|секунд|sec|s|c|cek)/i);
+                        // 1. Min + Sec (e.g. "1 мин 30 сек", "1 min 20 sec", "1 min 20 Cek")
+                        var mMS = str.match(/(\d+)\s*(?:мин|минут|min|m)[\s.,]+(\d+)\s*(?:[CcСс][EeеЕ][KkкК]|[Сс][еЕ][кК]|cek|сек|секунд|sec|secs|second|seconds|с|s|c)\b/i);
                         if (mMS) {
                             var mn = parseInt(mMS[1], 10) || 0;
                             var sc = parseInt(mMS[2], 10) || 0;
@@ -468,9 +468,10 @@ object AvisoTaskParser {
                             if (tot >= 3 && tot <= 1800) return tot;
                         }
 
-                        // 2. Exact seconds match (e.g. "10 сек", "5 сек", "20 сек", "15с", "10 sec", "5 cek", "10 cek", "20 cek", "30с", "10s", "5s")
-                        var mS = str.match(/(\d+)\s*(?:сек|секунд|секунды|секунда|sec|secs|second|seconds|cek|с|s|c)\b/i) ||
-                                 str.match(/(\d+)\s*(?:сек|секунд|секунды|секунда|sec|secs|second|seconds|cek|с|s|c)/i);
+                        // 2. Exact "Cek" / "сек" / "sec" duration match
+                        // Examples: "30 Cek", "60 Cek", "10 Cek", "20 cek", "30 сек", "60 сек", "20 sec"
+                        var mS = str.match(/(\d+)\s*(?:[CcСс][EeеЕ][KkкК]|[Сс][еЕ][кК]|cek|сек|секунд|секунды|секунда|sec|secs|second|seconds|с|s|c)\b/i) ||
+                                 str.match(/(\d+)\s*(?:cek|сек|секунд|sec|s|c)/i);
                         if (mS) {
                             var valS = parseInt(mS[1], 10) || 0;
                             if (valS >= 3 && valS <= 1800) return valS;
@@ -492,17 +493,17 @@ object AvisoTaskParser {
                             }
                         }
                     } catch(e) {}
-                    return 10;
+                    return 0; // Strictly NO DEFAULT TIME!
                 }
 
                 function extractDur(el) {
                     var d = extractSecondsFromTask(el);
-                    return (d && d > 0) ? d : (window._avisoLastExtractedSec || 10);
+                    return (d && d > 0) ? d : 0;
                 }
 
                 function extractDurationFromRow(rowEl, text) {
                     var d = extractSecondsFromTask(rowEl, text);
-                    return (d && d > 0) ? d : 10;
+                    return (d && d > 0) ? d : 0;
                 }
 
                 // Clean, reliable click helper for starting video task
@@ -879,6 +880,99 @@ object AvisoTaskParser {
                     window.AvisoBridge.onError('AutoWork start error: ' + err.toString());
                 }
             }
+        })();
+    """
+
+    /**
+     * VIDEO START RULE:
+     * When the selected video/page opens:
+     * 1. Wait for the page to load.
+     * 2. If a visible “Start” button appears, click that Start button.
+     * 3. Do not click unrelated buttons.
+     * 4. If Start does not appear, continue according to the existing workflow.
+     * 5. Do not restart the task unnecessarily.
+     */
+    const val JS_CLICK_START_BUTTON_ON_VIDEO_PAGE = """
+        (function() {
+            try {
+                function isVisible(el) {
+                    if (!el) return false;
+                    try {
+                        var style = window.getComputedStyle ? window.getComputedStyle(el) : null;
+                        if (style && (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0')) return false;
+                    } catch(e) {}
+                    return (el.offsetParent !== null || el.offsetWidth > 0 || el.offsetHeight > 0);
+                }
+
+                function isStartBtn(el) {
+                    if (!isVisible(el)) return false;
+                    var t = (el.innerText || el.textContent || el.value || el.getAttribute('aria-label') || '').trim().toLowerCase();
+                    var cls = (el.className || '').toString().toLowerCase();
+                    var id = (el.id || '').toLowerCase();
+
+                    // Do not click unrelated buttons
+                    if (t.indexOf('cancel') !== -1 || t.indexOf('delete') !== -1 || t.indexOf('отмена') !== -1 || t.indexOf('жалоб') !== -1 || t.indexOf('инструкция') !== -1) {
+                        return false;
+                    }
+
+                    // Direct "Start" button checks
+                    if (t === 'start' ||
+                        t === 'start watching' ||
+                        t === 'start view' ||
+                        t === 'start video' ||
+                        t === 'начать' ||
+                        t === 'начать просмотр' ||
+                        t === 'приступить к просмотру' ||
+                        t.indexOf('start watching') !== -1 ||
+                        t.indexOf('начать просмотр') !== -1 ||
+                        t.indexOf('приступить к просмотру') !== -1) {
+                        return true;
+                    }
+
+                    // Video play / start overlays
+                    if (id === 'start_video' || id === 'video-click' || cls.indexOf('btn_play') !== -1 || cls.indexOf('btn-play') !== -1 || cls.indexOf('ytp-large-play-button') !== -1) {
+                        return true;
+                    }
+
+                    return false;
+                }
+
+                var docs = [document];
+                try {
+                    for (var f = 0; f < window.frames.length; f++) {
+                        try {
+                            if (window.frames[f] && window.frames[f].document) docs.push(window.frames[f].document);
+                        } catch(e) {}
+                    }
+                } catch(e) {}
+
+                var clicked = false;
+                for (var d = 0; d < docs.length; d++) {
+                    var candidates = docs[d].querySelectorAll('button, a, input[type="button"], div[role="button"], span[role="button"], .btn, [class*="play"], [class*="start"]');
+                    for (var i = 0; i < candidates.length; i++) {
+                        if (isStartBtn(candidates[i])) {
+                            try { candidates[i].scrollIntoView({ behavior: 'instant', block: 'center' }); } catch(e) {}
+                            try { candidates[i].focus(); } catch(e) {}
+                            try {
+                                var rect = candidates[i].getBoundingClientRect();
+                                var cx = rect.left + rect.width / 2;
+                                var cy = rect.top + rect.height / 2;
+                                var opts = { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy };
+                                candidates[i].dispatchEvent(new MouseEvent('mousedown', opts));
+                                candidates[i].dispatchEvent(new MouseEvent('mouseup', opts));
+                                candidates[i].dispatchEvent(new MouseEvent('click', opts));
+                            } catch(e) {}
+                            try { candidates[i].click(); } catch(e) {}
+                            clicked = true;
+                            if (window.AvisoBridge && window.AvisoBridge.onAutomationLog) {
+                                window.AvisoBridge.onAutomationLog('[Video] Clicked visible Start button on opened page.');
+                            }
+                            break;
+                        }
+                    }
+                    if (clicked) break;
+                }
+            } catch(e) {}
         })();
     """
 
