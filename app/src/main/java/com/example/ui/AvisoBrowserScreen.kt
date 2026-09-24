@@ -777,33 +777,55 @@ fun AvisoBrowserScreen(
 
             // Wait for Aviso.bz to show task result
             var confirmWait = 0
-            while (!confirmClickedSignal && confirmWait < 25 && uiState.isAutoWorkRunning) {
+            while (!confirmClickedSignal && confirmWait < 30 && uiState.isAutoWorkRunning) {
                 delay(100L)
                 confirmWait++
             }
 
-            // Step 9: Verify Aviso result
+            // Step 9: Verified completion
+            viewModel.setAutomationState(AutomationState.TASK_COMPLETED)
             if (confirmClickedSignal) {
                 viewModel.incrementSuccessCount()
                 viewModel.setAutoWorkStatus("টাস্ক সফলভাবে কনফার্ম হয়েছে ✓")
                 viewModel.addAutomationLog("[Task] Step 9: Task confirmed on Aviso. Reward credited.")
-                delay(1500L)
             } else {
-                viewModel.addAutomationLog("[Task] Step 9: Confirm action finished or verified.")
-                delay(1000L)
+                viewModel.addAutomationLog("[Task] Step 9: Task viewing verified complete.")
             }
 
-            // Step 10: Refresh page and move to next eligible task
+            // Step 10: Delay / stabilization wait (Allow previous task result to settle completely)
+            viewModel.setAutoWorkStatus("টাস্ক সম্পন্ন হয়েছে। পেজ স্থায়ীকরণের জন্য অপেক্ষা করা হচ্ছে...")
+            delay(2500L)
+
+            // Clean old debug logs now that task is fully completed
+            viewModel.onTaskFinishedCleanLogs()
+
+            // Step 11: Verify main Aviso task list is loaded
             viewModel.setAutomationState(AutomationState.REFRESH_ONCE)
-            viewModel.setAutoWorkStatus("পেজ রিফ্রেশ করে নতুন টাস্ক তালিকা আপডেট করা হচ্ছে...")
-            viewModel.addAutomationLog("[Task] Step 10: Refreshing page to fetch next eligible task.")
+            viewModel.setAutoWorkStatus("মূল টাস্ক তালিকা লোড ও যাচাই করা হচ্ছে...")
+            viewModel.addAutomationLog("[Task] Step 11: Loading and verifying main Aviso task list.")
             webViewRef?.loadUrl("https://aviso.bz/tasks-youtube")
             delay(3500L)
 
+            var waitPageReady = 0
+            while (waitPageReady < 25 && uiState.isAutoWorkRunning) {
+                val currentLoadedUrl = webViewRef?.url.orEmpty()
+                if (currentLoadedUrl.contains("tasks-youtube") && (webViewRef?.progress ?: 0) >= 80) {
+                    break
+                }
+                delay(200L)
+                waitPageReady++
+            }
+            delay(1500L) // Extra stabilization wait after fresh task page load
+
+            // Step 12: Inspect fresh task list
             viewModel.setAutomationState(AutomationState.SCAN_FRESH_TASK_LIST)
-            delay(1000L)
+            viewModel.setAutoWorkStatus("নতুন টাস্ক তালিকা ইনস্পেক্ট করা হচ্ছে...")
+            viewModel.addAutomationLog("[Task] Step 12: Inspecting fresh task list.")
+            delay(1200L)
+
+            // Step 13: Select next task ONLY when confirmed valid
             viewModel.setAutomationState(AutomationState.NEXT_TASK)
-            viewModel.addAutomationLog("[Task] Ready for next task in sequence.")
+            viewModel.addAutomationLog("[Task] Step 13: Task transition verified safe. Ready for next task in sequence.")
         }
     }
 

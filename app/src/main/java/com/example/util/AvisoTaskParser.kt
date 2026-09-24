@@ -370,11 +370,100 @@ object AvisoTaskParser {
                     return (d && d > 0) ? d : (window._avisoLastExtractedSec || 15);
                 }
 
+                // CLICK-AREA PROTECTION: Strict check against financial, account, advertising account, and unrelated navigation
+                function isProtectedForbiddenElement(el) {
+                    if (!el) return true;
+                    var node = el;
+                    var depth = 0;
+                    while (node && depth < 6 && node !== document.body && node !== document.documentElement) {
+                        var tag = (node.tagName || '').toLowerCase();
+                        var id = (node.id || '').toLowerCase();
+                        var cls = (typeof node.className === 'string' ? node.className : '').toLowerCase();
+                        var href = (node.getAttribute ? (node.getAttribute('href') || '') : '').toLowerCase();
+                        var oc = (node.getAttribute ? (node.getAttribute('onclick') || '') : '').toLowerCase();
+                        var text = (node.innerText || node.textContent || '').trim().toLowerCase();
+
+                        // 1. Prohibited structural / navigation areas
+                        if (tag === 'header' || tag === 'footer' || tag === 'nav') return true;
+                        if (id.indexOf('header') !== -1 || id.indexOf('footer') !== -1 || id.indexOf('sidebar') !== -1 ||
+                            id.indexOf('navbar') !== -1 || id.indexOf('nav-') !== -1 || id.indexOf('menu') !== -1) {
+                            if (id.indexOf('adv_') === -1 && id.indexOf('task_') === -1 && id.indexOf('work') === -1) {
+                                return true;
+                            }
+                        }
+                        if (cls.indexOf('sidebar') !== -1 || cls.indexOf('header') !== -1 || cls.indexOf('footer') !== -1 ||
+                            cls.indexOf('navbar') !== -1 || cls.indexOf('user-menu') !== -1 || cls.indexOf('profile-') !== -1 ||
+                            cls.indexOf('balance') !== -1 || cls.indexOf('wallet') !== -1 || cls.indexOf('nav-') !== -1) {
+                            if (cls.indexOf('work') === -1 && cls.indexOf('task') === -1) {
+                                return true;
+                            }
+                        }
+
+                        // 2. Prohibited URL links & actions (financial, advertising account, profile, wallet, deposit, withdraw, etc.)
+                        if (href) {
+                            if (href.indexOf('/pay') !== -1 || href.indexOf('/bill') !== -1 || href.indexOf('/wallet') !== -1 ||
+                                href.indexOf('/money') !== -1 || href.indexOf('/cash') !== -1 || href.indexOf('/finance') !== -1 ||
+                                href.indexOf('/profile') !== -1 || href.indexOf('/user') !== -1 || href.indexOf('/wm/') !== -1 ||
+                                href.indexOf('/adv/') !== -1 || href.indexOf('/advert') !== -1 || href.indexOf('/settings') !== -1 ||
+                                href.indexOf('/payout') !== -1 || href.indexOf('/out') !== -1 || href.indexOf('/in') !== -1 ||
+                                href.indexOf('/balance') !== -1 || href.indexOf('/ref') !== -1 || href.indexOf('/mail') !== -1 ||
+                                href.indexOf('/msg') !== -1 || href.indexOf('/cabinet') !== -1 || href.indexOf('/account') !== -1) {
+                                return true;
+                            }
+                        }
+                        if (oc) {
+                            if (oc.indexOf('pay') !== -1 || oc.indexOf('wallet') !== -1 || oc.indexOf('money') !== -1 ||
+                                oc.indexOf('balance') !== -1 || oc.indexOf('profile') !== -1 || oc.indexOf('payout') !== -1 ||
+                                oc.indexOf('deposit') !== -1 || oc.indexOf('withdraw') !== -1 || oc.indexOf('user') !== -1) {
+                                return true;
+                            }
+                        }
+
+                        // 3. Prohibited text / labels
+                        var forbiddenWords = [
+                            'баланс', 'основной счет', 'рекламный счет', 'рекламный', 'пополнить', 'вывести', 'вывод', 'пополнение',
+                            'кошелек', 'профиль', 'личный кабинет', 'настройки', 'аккаунт', 'мои данные', 'рекламодатель',
+                            'заказать рекламу', 'управление рекламой', 'сообщения', 'почта', 'новости', 'рефералы', 'бонус',
+                            'advertising account', 'advertising', 'balance', 'wallet', 'deposit', 'withdrawal', 'withdraw',
+                            'payout', 'profile', 'account', 'settings', 'my account', 'messages', 'referrals',
+                            'ব্যালেন্স', 'অ্যাকাউন্ট', 'ওয়ালেট', 'উইথড্র', 'ডিপোজিট', 'প্রোফাইল'
+                        ];
+                        for (var fw = 0; fw < forbiddenWords.length; fw++) {
+                            var word = forbiddenWords[fw];
+                            if (text === word || text.indexOf(word) === 0 || (text.length < 35 && text.indexOf(word) !== -1)) {
+                                return true;
+                            }
+                        }
+
+                        node = node.parentElement;
+                        depth++;
+                    }
+                    return false;
+                }
+                window._isProtectedForbiddenElement = isProtectedForbiddenElement;
+                window._avisoInteractionLock = true;
+
+                // ACCIDENTAL INTERACTION LOCK: Block accidental clicks to forbidden areas
+                document.addEventListener('click', function(e) {
+                    if (window._avisoInteractionLock) {
+                        var target = e.target;
+                        if (isProtectedForbiddenElement(target)) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            e.stopImmediatePropagation();
+                            if (window.AvisoBridge && window.AvisoBridge.onAutomationLog) {
+                                window.AvisoBridge.onAutomationLog('[Protection] Accidental click blocked on protected element: ' + ((target && target.innerText) ? target.innerText.substring(0, 25) : (target.tagName || '')));
+                            }
+                            return false;
+                        }
+                    }
+                }, true);
+
                 // Global click listener to always capture the exact task row, click coordinates, cell, and duration
                 document.addEventListener('click', function(e) {
                     try {
                         var el = e.target;
-                        if (!el) return;
+                        if (!el || isProtectedForbiddenElement(el)) return;
                         var row = el.closest ? (el.closest('tr') || el.closest('.work-serf') || el.closest('.task-item') || el.closest('[id^="adv_"]') || el.closest('[id^="task_"]') || el.closest('[id^="bl_"]') || el.closest('div')) : null;
                         if (row) {
                             window._avisoLastTaskRow = row;
@@ -510,9 +599,30 @@ object AvisoTaskParser {
                     return extractDurationFromRow(null, text);
                 }
 
+                function isProtectedForbiddenElement(el) {
+                    if (window._isProtectedForbiddenElement) return window._isProtectedForbiddenElement(el);
+                    return false;
+                }
+
                 // Clean, reliable click helper for starting video task
-                function safeClick(el) {
+                function safeClick(el, requiredTaskRow) {
                     if (!el) return false;
+                    // CLICK-AREA PROTECTION: Verify target is not a protected financial/account element
+                    if (isProtectedForbiddenElement(el)) {
+                        if (window.AvisoBridge && window.AvisoBridge.onAutomationLog) {
+                            window.AvisoBridge.onAutomationLog('[Protection] Blocked click on forbidden financial/account element.');
+                        }
+                        return false;
+                    }
+
+                    // STRICT TARGET VALIDATION: Target must belong to current task row
+                    if (requiredTaskRow && !requiredTaskRow.contains(el)) {
+                        if (window.AvisoBridge && window.AvisoBridge.onAutomationLog) {
+                            window.AvisoBridge.onAutomationLog('[Protection] Target is outside current task row! Aborted.');
+                        }
+                        return false;
+                    }
+
                     try { el.scrollIntoView({ behavior: 'instant', block: 'center' }); } catch(e) {}
                     var aTag = (el.tagName === 'A') ? el : (el.closest ? el.closest('a') : null);
                     var href = (aTag ? aTag.getAttribute('href') : null) || el.getAttribute('href');
@@ -522,7 +632,7 @@ object AvisoTaskParser {
                     }
 
                     // Track clicked task element and ID without modifying styles
-                    var parentRow = el.closest ? (el.closest('tr') || el.closest('.work-serf') || el.closest('.task-item') || el.closest('[id^="adv_"]') || el.closest('[id^="task_"]')) : null;
+                    var parentRow = requiredTaskRow || (el.closest ? (el.closest('tr') || el.closest('.work-serf') || el.closest('.task-item') || el.closest('[id^="adv_"]') || el.closest('[id^="task_"]')) : null);
                     if (parentRow) {
                         window._avisoLastTaskRow = parentRow;
                         window._avisoLastTaskId = parentRow.id || parentRow.getAttribute('id') || parentRow.getAttribute('data-task-id') || parentRow.getAttribute('data-id') || '';
@@ -568,6 +678,7 @@ object AvisoTaskParser {
 
                 function isStartWatchingBtn(el) {
                     if (!el || el.offsetParent === null) return false;
+                    if (isProtectedForbiddenElement(el)) return false;
                     var t = (el.innerText || el.value || '').toLowerCase().trim();
                     var cls = (el.className || '').toString().toLowerCase();
                     var oc = (el.getAttribute('onclick') || '').toLowerCase();
@@ -783,7 +894,7 @@ object AvisoTaskParser {
 
                 // If "Приступить к просмотру" is ALREADY visible in this row, click it immediately!
                 if (startBtnAlreadyVisible) {
-                    safeClick(startBtnAlreadyVisible);
+                    safeClick(startBtnAlreadyVisible, foundRow);
                     if (window.AvisoBridge && window.AvisoBridge.onAutoWorkTaskStarted) {
                         window.AvisoBridge.onAutoWorkTaskStarted(durationSec);
                     }
@@ -791,7 +902,7 @@ object AvisoTaskParser {
                 }
 
                 // Otherwise, click the task link to reveal "Приступить к просмотру"
-                safeClick(targetLink);
+                safeClick(targetLink, foundRow);
 
                 // Poll for "Приступить к просмотру" or direct navigation
                 var pollAttempts = 0;
@@ -809,7 +920,7 @@ object AvisoTaskParser {
                         for (var sb = 0; sb < sbEls.length; sb++) {
                             var sTxt = (sbEls[sb].innerText || sbEls[sb].value || '').trim().toLowerCase();
                             if (sTxt === 'start watching' || sTxt.indexOf('start watching') !== -1 || sTxt === 'начать просмотр' || sTxt.indexOf('приступить к просмотру') !== -1) {
-                                safeClick(sbEls[sb]);
+                                safeClick(sbEls[sb], null);
                                 if (window.AvisoBridge && window.AvisoBridge.onInterstitialHandled) {
                                     window.AvisoBridge.onInterstitialHandled(dur);
                                 }
@@ -829,7 +940,7 @@ object AvisoTaskParser {
                         var rEl = rowBtns[rb];
                         if (isStartWatchingBtn(rEl)) {
                             clearInterval(pollTimer);
-                            safeClick(rEl);
+                            safeClick(rEl, foundRow);
                             foundAction = true;
                             if (window.AvisoBridge && window.AvisoBridge.onAutoWorkTaskStarted) {
                                 window.AvisoBridge.onAutoWorkTaskStarted(durationSec);
@@ -838,14 +949,14 @@ object AvisoTaskParser {
                         }
                     }
 
-                    // Check if any global button appeared
+                    // Check if any button appeared strictly associated with this task row
                     if (!foundAction) {
                         var gBtns = document.querySelectorAll('button, a, input[type="button"], span, div');
                         for (var gb = 0; gb < gBtns.length; gb++) {
                             var gEl = gBtns[gb];
-                            if (isStartWatchingBtn(gEl)) {
+                            if (isStartWatchingBtn(gEl) && foundRow.contains(gEl)) {
                                 clearInterval(pollTimer);
-                                safeClick(gEl);
+                                safeClick(gEl, foundRow);
                                 foundAction = true;
                                 if (window.AvisoBridge && window.AvisoBridge.onAutoWorkTaskStarted) {
                                     window.AvisoBridge.onAutoWorkTaskStarted(durationSec);
@@ -910,6 +1021,7 @@ object AvisoTaskParser {
 
                 function isStartBtn(el) {
                     if (!isVisible(el)) return false;
+                    if (window._isProtectedForbiddenElement && window._isProtectedForbiddenElement(el)) return false;
                     var t = (el.innerText || el.textContent || el.value || el.getAttribute('aria-label') || '').trim().toLowerCase();
                     var cls = (el.className || '').toString().toLowerCase();
                     var id = (el.id || '').toLowerCase();
@@ -1290,27 +1402,40 @@ object AvisoTaskParser {
                     return docs;
                 }
 
-                function safeClick(el) {
+                function isProtectedForbiddenElement(el) {
+                    if (window._isProtectedForbiddenElement) return window._isProtectedForbiddenElement(el);
+                    return false;
+                }
+
+                function safeClick(el, requiredTaskRow) {
                     if (!el) return false;
+                    // CLICK-AREA PROTECTION: Verify target is not forbidden
+                    if (isProtectedForbiddenElement(el)) {
+                        if (window.AvisoBridge && window.AvisoBridge.onAutomationLog) {
+                            window.AvisoBridge.onAutomationLog('[Protection] Blocked click: target is forbidden account/financial element.');
+                        }
+                        return false;
+                    }
+
+                    // STRICT TARGET VALIDATION: Must be inside expected task row
+                    if (requiredTaskRow && !requiredTaskRow.contains(el)) {
+                        if (window.AvisoBridge && window.AvisoBridge.onAutomationLog) {
+                            window.AvisoBridge.onAutomationLog('[Protection] Blocked click: target is outside expected task row.');
+                        }
+                        return false;
+                    }
+
                     try { el.scrollIntoView({ behavior: 'instant', block: 'center' }); } catch(e) {}
                     try { el.focus(); } catch(e) {}
 
-                    // 1. Highlight visually
-                    try {
-                        el.style.outline = '4px solid #22c55e';
-                        el.style.boxShadow = '0 0 25px rgba(34, 197, 94, 0.9)';
-                        el.style.borderRadius = '8px';
-                        el.style.backgroundColor = 'rgba(34, 197, 94, 0.3)';
-                    } catch(e) {}
-
-                    // 2. Direct onclick property execution
+                    // 1. Direct onclick property execution
                     try {
                         if (typeof el.onclick === 'function') {
                             el.onclick.call(el, { target: el, currentTarget: el, preventDefault: function(){}, stopPropagation: function(){} });
                         }
                     } catch(e) {}
 
-                    // 3. Evaluate onclick attribute string in window scope
+                    // 2. Evaluate onclick attribute string in window scope
                     try {
                         var oc = el.getAttribute ? el.getAttribute('onclick') : null;
                         if (oc) {
@@ -1319,10 +1444,10 @@ object AvisoTaskParser {
                         }
                     } catch(e) {}
 
-                    // 4. Native click()
+                    // 3. Native click()
                     try { el.click(); } catch(e) {}
 
-                    // 5. Full Mouse & Pointer & Touch Event dispatch
+                    // 4. Full Mouse & Pointer & Touch Event dispatch
                     try {
                         var rect = el.getBoundingClientRect();
                         var cx = (rect.left + rect.width / 2) || 100;
@@ -1518,8 +1643,8 @@ object AvisoTaskParser {
                 }
 
                 // 3. Strict Execution: Click ONLY if the button belongs to this exact task
-                if (targetConfirmBtn) {
-                    safeClick(targetConfirmBtn);
+                if (targetConfirmBtn && targetRow.contains(targetConfirmBtn) && !isProtectedForbiddenElement(targetConfirmBtn)) {
+                    safeClick(targetConfirmBtn, targetRow);
                     clicked = true;
                     if (window.AvisoBridge && window.AvisoBridge.onAutomationLog) {
                         window.AvisoBridge.onAutomationLog('[Confirm] Clicked Confirm View on the exact same task row.');

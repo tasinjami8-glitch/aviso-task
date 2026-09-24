@@ -369,13 +369,40 @@ class AvisoViewModel : ViewModel() {
         _uiState.update { it.copy(currentTaskContext = context) }
     }
 
+    private var lastLogPruneTimestamp = System.currentTimeMillis()
+
     fun addAutomationLog(message: String) {
         val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
         val timestamp = timeFormat.format(Date())
         val entry = "[$timestamp] $message"
         _uiState.update { current ->
-            val updated = (listOf(entry) + current.automationLogs).take(200)
+            // Keep recent current execution information visible (max 35 items)
+            val updated = (listOf(entry) + current.automationLogs).take(35)
             current.copy(automationLogs = updated)
+        }
+
+        // Periodic auto-clear: automatically prune old logs every 45s so they do not build up
+        val now = System.currentTimeMillis()
+        if (now - lastLogPruneTimestamp > 45_000L) {
+            lastLogPruneTimestamp = now
+            pruneOldLogsPeriodically()
+        }
+    }
+
+    fun pruneOldLogsPeriodically() {
+        _uiState.update { current ->
+            // Retain recent execution information without interrupting active task
+            val pruned = current.automationLogs.take(20)
+            current.copy(automationLogs = pruned)
+        }
+    }
+
+    fun onTaskFinishedCleanLogs() {
+        _uiState.update { current ->
+            // After a task is fully finished, old debug logs may be cleared,
+            // keeping only recent milestone/status logs (last 8 entries)
+            val cleaned = current.automationLogs.take(8)
+            current.copy(automationLogs = cleaned)
         }
     }
 
