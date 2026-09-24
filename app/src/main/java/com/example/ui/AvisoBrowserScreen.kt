@@ -572,6 +572,12 @@ fun AvisoBrowserScreen(
 
             // Step 0: Pre-Scan Wrong Page Safety Verification
             val curUrl = webViewRef?.url.orEmpty()
+            if (curUrl.contains("/login") || curUrl.contains("/auth") || curUrl.contains("/register")) {
+                viewModel.pauseAutoWork()
+                viewModel.setAutoWorkStatus("লগইন প্রয়োজন (Login Required) - অনুগ্রহ করে আগে লগইন করুন")
+                viewModel.addAutomationLog("[Login] Please log in to Aviso.bz to continue automation.")
+                return@LaunchedEffect
+            }
             if (curUrl.isNotEmpty() && !curUrl.contains("tasks-youtube") && !curUrl.contains("/vl/") && !curUrl.contains("/go/") && !curUrl.contains("youtube")) {
                 viewModel.reportWrongPage("NOT_ON_TASK_PAGE", curUrl)
                 viewModel.addAutomationLog("[Protection] Pre-check: Wrong page ($curUrl). Triggering safe recovery.")
@@ -1488,14 +1494,13 @@ fun AvisoBrowserScreen(
                                                             targetUrl.contains("youtube.php")
                                                     if (isVideoLink) {
                                                         if (uiState.openInExternalYouTubeApp && (targetUrl.contains("youtube.com") || targetUrl.contains("youtu.be"))) {
-                                                             launchYouTubeApp(ctx, targetUrl)
+                                                            launchYouTubeApp(ctx, targetUrl)
                                                         } else {
                                                             viewModel.openVideoTab(targetUrl, 20)
                                                         }
-                                                    } else if (targetUrl.contains("tasks-youtube") || targetUrl.contains("tasks-vk") || targetUrl.contains("tasks")) {
-                                                        mainWv.loadUrl(targetUrl)
                                                     } else {
-                                                        viewModel.addNewTab(targetUrl, "ট্যাব ${uiState.tabs.size + 1}")
+                                                        // Login popups, OAuth (Google, VK, Telegram, Yandex), and captcha dialogs load in main WebView
+                                                        mainWv.loadUrl(targetUrl)
                                                     }
                                                 }
                                                 v?.postDelayed({ v.destroy() }, 800L)
@@ -1573,8 +1578,17 @@ fun AvisoBrowserScreen(
                                     if (url.startsWith("http://") || url.startsWith("https://")) {
                                         val uri = Uri.parse(url)
                                         val host = uri.host.orEmpty().lowercase()
-                                        // If external non-aviso site, open in new tab
-                                        if (host.isNotEmpty() && !host.contains("aviso.bz") && !host.contains("google.com") && !host.contains("recaptcha") && !host.contains("hcaptcha") && !host.contains("cloudflare")) {
+                                        // Allow OAuth login providers (Google, VK, Telegram, Yandex, WebMoney) and captchas to load inside this WebView
+                                        val isAuthOrCaptcha = host.contains("google.com") ||
+                                                host.contains("accounts.google") ||
+                                                host.contains("vk.com") ||
+                                                host.contains("telegram.org") ||
+                                                host.contains("yandex.ru") ||
+                                                host.contains("wmtransfer.com") ||
+                                                host.contains("recaptcha") ||
+                                                host.contains("hcaptcha") ||
+                                                host.contains("cloudflare")
+                                        if (!isAuthOrCaptcha) {
                                             viewModel.addNewTab(url, uri.host ?: "ট্যাব")
                                             return true
                                         }

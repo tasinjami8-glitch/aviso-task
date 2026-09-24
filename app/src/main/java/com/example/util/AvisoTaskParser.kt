@@ -370,9 +370,39 @@ object AvisoTaskParser {
                     return (d && d > 0) ? d : (window._avisoLastExtractedSec || 15);
                 }
 
-                // CLICK-AREA PROTECTION: Strict check against financial, account, advertising account, and unrelated navigation
+                // CLICK-AREA PROTECTION: Strict check against financial, advertising account, and unrelated navigation during auto-work
                 function isProtectedForbiddenElement(el) {
-                    if (!el) return true;
+                    if (!el) return false;
+
+                    // NEVER block login, authentication, registration, captcha, or form inputs
+                    var pageUrl = (window.location.href || '').toLowerCase();
+                    if (pageUrl.indexOf('/login') !== -1 || pageUrl.indexOf('/auth') !== -1 || pageUrl.indexOf('/register') !== -1) {
+                        return false;
+                    }
+
+                    var initialTag = (el.tagName || '').toLowerCase();
+                    if (initialTag === 'input' || initialTag === 'textarea' || initialTag === 'select' || initialTag === 'label' || initialTag === 'form') {
+                        return false;
+                    }
+
+                    var initialHref = (el.getAttribute ? (el.getAttribute('href') || '') : '').toLowerCase();
+                    var initialId = (el.id || '').toLowerCase();
+                    var initialCls = (typeof el.className === 'string' ? el.className : '').toLowerCase();
+                    var initialText = (el.innerText || el.textContent || '').trim().toLowerCase();
+
+                    if (initialHref.indexOf('/login') !== -1 || initialHref.indexOf('/auth') !== -1 || initialHref.indexOf('/signin') !== -1 || initialHref.indexOf('/register') !== -1) {
+                        return false;
+                    }
+                    if (initialId.indexOf('login') !== -1 || initialId.indexOf('auth') !== -1 || initialId.indexOf('captcha') !== -1 || initialId.indexOf('turnstile') !== -1) {
+                        return false;
+                    }
+                    if (initialCls.indexOf('login') !== -1 || initialCls.indexOf('auth') !== -1 || initialCls.indexOf('captcha') !== -1 || initialCls.indexOf('turnstile') !== -1 || initialCls.indexOf('recaptcha') !== -1) {
+                        return false;
+                    }
+                    if (initialText === 'вход' || initialText === 'войти' || initialText.indexOf('войти') === 0 || initialText === 'login' || initialText === 'sign in' || initialText === 'авторизация') {
+                        return false;
+                    }
+
                     var node = el;
                     var depth = 0;
                     while (node && depth < 6 && node !== document.body && node !== document.documentElement) {
@@ -383,7 +413,18 @@ object AvisoTaskParser {
                         var oc = (node.getAttribute ? (node.getAttribute('onclick') || '') : '').toLowerCase();
                         var text = (node.innerText || node.textContent || '').trim().toLowerCase();
 
-                        // 1. Prohibited structural / navigation areas
+                        // Whitelist login containers, forms, or authentication sections
+                        if (href.indexOf('/login') !== -1 || href.indexOf('/auth') !== -1 || href.indexOf('/signin') !== -1 || href.indexOf('/register') !== -1) {
+                            return false;
+                        }
+                        if (id.indexOf('login') !== -1 || id.indexOf('auth') !== -1 || id.indexOf('captcha') !== -1 || id.indexOf('turnstile') !== -1) {
+                            return false;
+                        }
+                        if (cls.indexOf('login') !== -1 || cls.indexOf('auth') !== -1 || cls.indexOf('captcha') !== -1 || cls.indexOf('turnstile') !== -1) {
+                            return false;
+                        }
+
+                        // 1. Prohibited structural / navigation areas for auto-bot
                         if (tag === 'header' || tag === 'footer' || tag === 'nav') return true;
                         if (id.indexOf('header') !== -1 || id.indexOf('footer') !== -1 || id.indexOf('sidebar') !== -1 ||
                             id.indexOf('navbar') !== -1 || id.indexOf('nav-') !== -1 || id.indexOf('menu') !== -1) {
@@ -403,29 +444,29 @@ object AvisoTaskParser {
                         if (href) {
                             if (href.indexOf('/pay') !== -1 || href.indexOf('/bill') !== -1 || href.indexOf('/wallet') !== -1 ||
                                 href.indexOf('/money') !== -1 || href.indexOf('/cash') !== -1 || href.indexOf('/finance') !== -1 ||
-                                href.indexOf('/profile') !== -1 || href.indexOf('/user') !== -1 || href.indexOf('/wm/') !== -1 ||
+                                href.indexOf('/profile') !== -1 || href.indexOf('/user/') !== -1 || href.indexOf('/wm/') !== -1 ||
                                 href.indexOf('/adv/') !== -1 || href.indexOf('/advert') !== -1 || href.indexOf('/settings') !== -1 ||
-                                href.indexOf('/payout') !== -1 || href.indexOf('/out') !== -1 || href.indexOf('/in') !== -1 ||
+                                href.indexOf('/payout') !== -1 || href.indexOf('/deposit') !== -1 || href.indexOf('/popolnit') !== -1 ||
                                 href.indexOf('/balance') !== -1 || href.indexOf('/ref') !== -1 || href.indexOf('/mail') !== -1 ||
-                                href.indexOf('/msg') !== -1 || href.indexOf('/cabinet') !== -1 || href.indexOf('/account') !== -1) {
+                                href.indexOf('/msg') !== -1 || href.indexOf('/cabinet') !== -1) {
                                 return true;
                             }
                         }
                         if (oc) {
                             if (oc.indexOf('pay') !== -1 || oc.indexOf('wallet') !== -1 || oc.indexOf('money') !== -1 ||
                                 oc.indexOf('balance') !== -1 || oc.indexOf('profile') !== -1 || oc.indexOf('payout') !== -1 ||
-                                oc.indexOf('deposit') !== -1 || oc.indexOf('withdraw') !== -1 || oc.indexOf('user') !== -1) {
+                                oc.indexOf('deposit') !== -1 || oc.indexOf('withdraw') !== -1) {
                                 return true;
                             }
                         }
 
-                        // 3. Prohibited text / labels
+                        // 3. Prohibited text / labels for auto-bot
                         var forbiddenWords = [
                             'баланс', 'основной счет', 'рекламный счет', 'рекламный', 'пополнить', 'вывести', 'вывод', 'пополнение',
-                            'кошелек', 'профиль', 'личный кабинет', 'настройки', 'аккаунт', 'мои данные', 'рекламодатель',
+                            'кошелек', 'профиль', 'личный кабинет', 'мои данные', 'рекламодатель',
                             'заказать рекламу', 'управление рекламой', 'сообщения', 'почта', 'новости', 'рефералы', 'бонус',
                             'advertising account', 'advertising', 'balance', 'wallet', 'deposit', 'withdrawal', 'withdraw',
-                            'payout', 'profile', 'account', 'settings', 'my account', 'messages', 'referrals',
+                            'payout', 'profile', 'my account', 'messages', 'referrals',
                             'ব্যালেন্স', 'অ্যাকাউন্ট', 'ওয়ালেট', 'উইথড্র', 'ডিপোজিট', 'প্রোফাইল'
                         ];
                         for (var fw = 0; fw < forbiddenWords.length; fw++) {
@@ -441,23 +482,7 @@ object AvisoTaskParser {
                     return false;
                 }
                 window._isProtectedForbiddenElement = isProtectedForbiddenElement;
-                window._avisoInteractionLock = true;
-
-                // ACCIDENTAL INTERACTION LOCK: Block accidental clicks to forbidden areas
-                document.addEventListener('click', function(e) {
-                    if (window._avisoInteractionLock) {
-                        var target = e.target;
-                        if (isProtectedForbiddenElement(target)) {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            e.stopImmediatePropagation();
-                            if (window.AvisoBridge && window.AvisoBridge.onAutomationLog) {
-                                window.AvisoBridge.onAutomationLog('[Protection] Accidental click blocked on protected element: ' + ((target && target.innerText) ? target.innerText.substring(0, 25) : (target.tagName || '')));
-                            }
-                            return false;
-                        }
-                    }
-                }, true);
+                window._avisoInteractionLock = false;
 
                 // Global click listener to always capture the exact task row, click coordinates, cell, and duration
                 document.addEventListener('click', function(e) {
