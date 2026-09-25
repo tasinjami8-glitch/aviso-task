@@ -850,10 +850,8 @@ object AvisoTaskParser {
                     if (!sec || sec <= 0) {
                         sec = extractDurationFromRow(row, rText);
                     }
-
-                    // Strict: If timer cannot be read, DO NOT GUESS -> skip this task
                     if (!sec || sec <= 0) {
-                        continue;
+                        sec = 20;
                     }
 
                     // Step 6: From the SAME task row, locate the YouTube video link on the LEFT side

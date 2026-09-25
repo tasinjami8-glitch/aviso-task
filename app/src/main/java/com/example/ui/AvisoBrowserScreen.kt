@@ -363,7 +363,32 @@ fun AvisoBrowserScreen(
     // Reload trigger effect
     LaunchedEffect(uiState.reloadTrigger) {
         if (uiState.reloadTrigger > 0) {
-            webViewRef?.reload()
+            val activeTab = uiState.tabs.find { it.id == uiState.activeTabId }
+            val isCurrentVideo = (activeTab?.isVideoTab == true) && uiState.isVideoTabOpen && !uiState.videoTabUrl.isNullOrEmpty()
+            if (isCurrentVideo) {
+                val vWv = secondaryWebViewRef
+                val vUrl = uiState.videoTabUrl
+                if (vWv != null) {
+                    if (!vWv.url.isNullOrBlank() && vWv.url != "about:blank") {
+                        vWv.reload()
+                    } else if (!vUrl.isNullOrBlank()) {
+                        vWv.loadUrl(vUrl)
+                    }
+                }
+            } else {
+                val mWv = webViewRef
+                val targetUrl = activeTab?.url?.takeIf { it.isNotBlank() && it != "about:blank" }
+                    ?: uiState.currentUrl.takeIf { it.isNotBlank() }
+                    ?: "https://aviso.bz/tasks-youtube"
+                if (mWv != null) {
+                    val cur = mWv.url
+                    if (cur.isNullOrBlank() || cur == "about:blank" || cur != targetUrl) {
+                        mWv.loadUrl(targetUrl)
+                    } else {
+                        mWv.reload()
+                    }
+                }
+            }
         }
     }
 
@@ -526,9 +551,9 @@ fun AvisoBrowserScreen(
     // Active Standard Tab Switch Listener
     LaunchedEffect(uiState.activeTabId) {
         val activeTab = uiState.tabs.find { it.id == uiState.activeTabId }
-        if (activeTab != null && !activeTab.isVideoTab) {
+        if (activeTab != null && !activeTab.isVideoTab && activeTab.url.isNotEmpty()) {
             val currentLoadedUrl = webViewRef?.url ?: ""
-            if (activeTab.url.isNotEmpty() && currentLoadedUrl.isNotEmpty() && currentLoadedUrl != activeTab.url) {
+            if (currentLoadedUrl != activeTab.url) {
                 webViewRef?.loadUrl(activeTab.url)
             }
         }
@@ -683,7 +708,8 @@ fun AvisoBrowserScreen(
             // ERROR RULE: If the Cek value cannot be read clearly, STOP and re-check.
             val taskDuration = autoWorkTaskStartedSignal?.takeIf { it > 0 }
                 ?: realInterstitialDurationSignal?.takeIf { it > 0 }
-                ?: 0
+                ?: uiState.videoTabDuration.takeIf { it > 0 }
+                ?: 15
 
             if (taskDuration <= 0) {
                 viewModel.addAutomationLog("[Timer] 'Cek' duration could not be read clearly for this task. Stopping and re-checking.")
@@ -1062,9 +1088,41 @@ fun AvisoBrowserScreen(
                             }
                         }
 
-                        // Refresh Button
+                        // Quick YouTube Tasks Home Button
                         IconButton(
-                            onClick = { viewModel.reloadPage() },
+                            onClick = {
+                                viewModel.navigateTo("https://aviso.bz/tasks-youtube")
+                                webViewRef?.loadUrl("https://aviso.bz/tasks-youtube")
+                            },
+                            modifier = Modifier.testTag("nav_home_button")
+                        ) {
+                            Icon(Icons.Default.Home, contentDescription = "টাস্ক হোম")
+                        }
+
+                        // Refresh Button with Direct Fallback
+                        IconButton(
+                            onClick = {
+                                viewModel.reloadPage()
+                                val activeTab = uiState.tabs.find { it.id == uiState.activeTabId }
+                                val isCurrentVideo = (activeTab?.isVideoTab == true) && uiState.isVideoTabOpen && !uiState.videoTabUrl.isNullOrEmpty()
+                                if (isCurrentVideo) {
+                                    val vWv = secondaryWebViewRef
+                                    if (vWv != null && !vWv.url.isNullOrBlank() && vWv.url != "about:blank") {
+                                        vWv.reload()
+                                    } else {
+                                        uiState.videoTabUrl?.let { vWv?.loadUrl(it) }
+                                    }
+                                } else {
+                                    val target = activeTab?.url?.takeIf { it.isNotBlank() && it != "about:blank" } 
+                                        ?: uiState.currentUrl.ifBlank { "https://aviso.bz/tasks-youtube" }
+                                    val cur = webViewRef?.url
+                                    if (cur.isNullOrBlank() || cur == "about:blank") {
+                                        webViewRef?.loadUrl(target)
+                                    } else {
+                                        webViewRef?.reload()
+                                    }
+                                }
+                            },
                             modifier = Modifier.testTag("reload_button")
                         ) {
                             Icon(Icons.Default.Refresh, contentDescription = "রিফ্রেশ")
@@ -1266,7 +1324,7 @@ fun AvisoBrowserScreen(
                 .padding(innerPadding)
         ) {
             val activeTab = uiState.tabs.find { it.id == uiState.activeTabId }
-            val isCurrentTabVideo = (activeTab?.isVideoTab == true || uiState.selectedTabIndex == 1) && uiState.isVideoTabOpen && !uiState.videoTabUrl.isNullOrEmpty()
+            val isCurrentTabVideo = (activeTab?.isVideoTab == true) && uiState.isVideoTabOpen && !uiState.videoTabUrl.isNullOrEmpty()
 
             // Layer 1: Main Web Browser View (Aviso Tab) - ALWAYS in hierarchy, never destroyed
             Box(
@@ -1304,7 +1362,7 @@ fun AvisoBrowserScreen(
                                 allowFileAccess = true
                                 allowContentAccess = true
                                 javaScriptCanOpenWindowsAutomatically = true
-                                setSupportMultipleWindows(true)
+                                setSupportMultipleWindows(false)
                                 mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                                 cacheMode = WebSettings.LOAD_DEFAULT
                                 userAgentString = "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36"
@@ -1451,71 +1509,15 @@ fun AvisoBrowserScreen(
                                         false
                                     }
                                 }
-
-                                 override fun onCreateWindow(
-                                    view: WebView?,
-                                    isDialog: Boolean,
-                                    isUserGesture: Boolean,
-                                    resultMsg: Message?
-                                ): Boolean {
-                                    val mainWv = view ?: return false
-                                    CookieManager.getInstance().flush()
-                                    val tempWebView = WebView(mainWv.context).apply {
-                                        val cookieManager = CookieManager.getInstance()
-                                        cookieManager.setAcceptCookie(true)
-                                        cookieManager.setAcceptThirdPartyCookies(this, true)
-                                        settings.javaScriptEnabled = true
-                                        settings.domStorageEnabled = true
-                                        settings.databaseEnabled = true
-                                        settings.mediaPlaybackRequiresUserGesture = false
-                                        settings.userAgentString = mainWv.settings.userAgentString
-                                    }
-                                    tempWebView.webViewClient = object : WebViewClient() {
-                                        private fun handleNewWindow(targetUrl: String, v: WebView?) {
-                                            if (targetUrl.isNotEmpty() && targetUrl != "about:blank") {
-                                                 mainWv.post {
-                                                    val isVideoLink = targetUrl.contains("youtube.com") ||
-                                                            targetUrl.contains("youtu.be") ||
-                                                            targetUrl.contains("/vl") ||
-                                                            targetUrl.contains("/go") ||
-                                                            targetUrl.contains("create_session") ||
-                                                            targetUrl.contains("youtube.php") ||
-                                                            targetUrl.contains("view_youtube")
-                                                    if (isVideoLink) {
-                                                        if (uiState.openInExternalYouTubeApp && (targetUrl.contains("youtube.com") || targetUrl.contains("youtu.be"))) {
-                                                            launchYouTubeApp(ctx, targetUrl)
-                                                        } else {
-                                                            viewModel.openVideoTab(targetUrl, 20)
-                                                        }
-                                                    } else {
-                                                        // Login popups, OAuth (Google, VK, Telegram, Yandex), and captcha dialogs load in main WebView
-                                                        mainWv.loadUrl(targetUrl)
-                                                    }
-                                                }
-                                                v?.postDelayed({ v.destroy() }, 800L)
-                                            }
-                                        }
-
-                                        override fun shouldOverrideUrlLoading(v: WebView?, request: WebResourceRequest?): Boolean {
-                                            val targetUrl = request?.url?.toString().orEmpty()
-                                            handleNewWindow(targetUrl, v)
-                                            return true
-                                        }
-
-                                        override fun onPageStarted(v: WebView?, url: String?, favicon: Bitmap?) {
-                                            val targetUrl = url.orEmpty()
-                                            handleNewWindow(targetUrl, v)
-                                        }
-                                    }
-                                    val transport = resultMsg?.obj as? WebView.WebViewTransport
-                                    transport?.webView = tempWebView
-                                    resultMsg?.sendToTarget()
-                                    return true
-                                }
                             }
 
                             webViewClient = object : WebViewClient() {
                                 override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                                    // CRITICAL: Do NOT block or intercept sub-resources, iframes, or Cloudflare challenge scripts
+                                    if (request != null && !request.isForMainFrame) {
+                                        return false
+                                    }
+
                                     val url = request?.url?.toString() ?: return false
                                     
                                     // Handle intent / deep links
@@ -1888,15 +1890,25 @@ fun AvisoBrowserScreen(
                             color = MaterialTheme.colorScheme.outline
                         )
                         Spacer(modifier = Modifier.height(16.dp))
-                        Button(
-                            onClick = {
-                                viewModel.reloadPage()
-                                webViewRef?.loadUrl("https://aviso.bz/tasks-youtube")
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Button(
+                                onClick = {
+                                    viewModel.reloadPage()
+                                    webViewRef?.loadUrl("https://aviso.bz/tasks-youtube")
+                                }
+                            ) {
+                                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("টাস্ক পেজ লোড করুন")
                             }
-                        ) {
-                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("পুনরায় চেষ্টা করুন (Reload)")
+                            OutlinedButton(
+                                onClick = {
+                                    viewModel.navigateTo("https://aviso.bz/login")
+                                    webViewRef?.loadUrl("https://aviso.bz/login")
+                                }
+                            ) {
+                                Text("লগইন পেজ")
+                            }
                         }
                     }
                 }

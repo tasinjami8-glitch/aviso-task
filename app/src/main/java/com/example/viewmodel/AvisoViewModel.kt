@@ -137,11 +137,30 @@ class AvisoViewModel : ViewModel() {
     }
 
     fun reloadPage() {
-        _uiState.update { it.copy(reloadTrigger = System.currentTimeMillis(), errorMessage = null) }
+        _uiState.update { 
+            it.copy(
+                reloadTrigger = System.currentTimeMillis(), 
+                errorMessage = null,
+                isLoading = true,
+                progress = 15
+            ) 
+        }
     }
 
     fun navigateTo(url: String) {
-        _uiState.update { it.copy(currentUrl = url, errorMessage = null) }
+        _uiState.update { current ->
+            val updatedTabs = current.tabs.map { tab ->
+                if (tab.id == current.activeTabId) tab.copy(url = url) else tab
+            }
+            current.copy(
+                currentUrl = url,
+                tabs = updatedTabs,
+                errorMessage = null,
+                isLoading = true,
+                progress = 15,
+                reloadTrigger = System.currentTimeMillis()
+            )
+        }
     }
 
     fun setProgress(progress: Int) {
@@ -490,7 +509,13 @@ class AvisoViewModel : ViewModel() {
             current.copy(
                 tabs = updatedTabs,
                 activeTabId = newId,
-                selectedTabIndex = newIdx
+                selectedTabIndex = newIdx,
+                isVideoTabOpen = false,
+                currentUrl = url,
+                errorMessage = null,
+                isLoading = true,
+                progress = 15,
+                reloadTrigger = System.currentTimeMillis()
             )
         }
         return newId
@@ -500,14 +525,17 @@ class AvisoViewModel : ViewModel() {
         _uiState.update { current ->
             val index = current.tabs.indexOfFirst { it.id == tabId }
             val tab = current.tabs.find { it.id == tabId }
+            val isVid = tab?.isVideoTab == true
+            val targetUrl = if (!isVid && tab != null && tab.url.isNotBlank()) tab.url else current.currentUrl
             current.copy(
                 activeTabId = tabId,
                 selectedTabIndex = if (index >= 0) index else 0,
-                isVideoTabOpen = tab?.isVideoTab == true,
-                videoTabUrl = if (tab?.isVideoTab == true) tab.url else current.videoTabUrl,
-                videoTabTitle = if (tab?.isVideoTab == true) tab.title else current.videoTabTitle,
-                videoTabDuration = if (tab?.isVideoTab == true) tab.durationSec else current.videoTabDuration,
-                videoTabRemainingSec = if (tab?.isVideoTab == true) tab.remainingSec else current.videoTabRemainingSec
+                isVideoTabOpen = isVid,
+                currentUrl = targetUrl,
+                videoTabUrl = if (isVid) tab?.url else current.videoTabUrl,
+                videoTabTitle = if (isVid) (tab?.title ?: current.videoTabTitle) else current.videoTabTitle,
+                videoTabDuration = if (isVid) (tab?.durationSec ?: current.videoTabDuration) else current.videoTabDuration,
+                videoTabRemainingSec = if (isVid) (tab?.remainingSec ?: current.videoTabRemainingSec) else current.videoTabRemainingSec
             )
         }
     }
@@ -527,13 +555,16 @@ class AvisoViewModel : ViewModel() {
             }
             val newActiveTab = newTabs.find { it.id == newActiveId }
             val newIndex = newTabs.indexOfFirst { it.id == newActiveId }.coerceAtLeast(0)
+            val isVid = newActiveTab?.isVideoTab == true
+            val targetUrl = if (!isVid && newActiveTab != null && newActiveTab.url.isNotBlank()) newActiveTab.url else current.currentUrl
             current.copy(
                 tabs = newTabs,
                 activeTabId = newActiveId,
                 selectedTabIndex = newIndex,
-                isVideoTabOpen = newTabs.any { it.isVideoTab },
-                videoTabUrl = if (newActiveTab?.isVideoTab == true) newActiveTab.url else null,
-                videoTabRemainingSec = if (newActiveTab?.isVideoTab == true) newActiveTab.remainingSec else 0
+                isVideoTabOpen = isVid,
+                currentUrl = targetUrl,
+                videoTabUrl = if (isVid) newActiveTab?.url else null,
+                videoTabRemainingSec = if (isVid) (newActiveTab?.remainingSec ?: 0) else 0
             )
         }
     }
