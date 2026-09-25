@@ -2,40 +2,89 @@ package com.example.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-// Premium Executive Dark Palette
-val SlateDark950 = Color(0xFF090D16)
-val SlateDark900 = Color(0xFF0F172A)
-val SlateDark850 = Color(0xFF162036)
-val SlateDark800 = Color(0xFF1E293B)
+// Modern Luxury Pro Palette (Indigo, Violet, Emerald, Deep Obsidian)
+val ObsidianDark = Color(0xFF0B0F19)
+val SurfaceDark = Color(0xFF111827)
+val SurfaceDarkVariant = Color(0xFF1E293B)
+val SurfaceDarkElevated = Color(0xFF243046)
+val BorderDark = Color(0xFF2E3D56)
+val BorderHighlight = Color(0xFF4F46E5)
+
+// Vibrant Modern Accents
+val PrimaryIndigo = Color(0xFF6366F1)
+val PrimaryIndigoGlow = Color(0xFF818CF8)
+val PrimaryIndigoContainer = Color(0xFF1E1B4B)
+
+val AccentViolet = Color(0xFF8B5CF6)
+val AccentVioletLight = Color(0xFFA78BFA)
+val AccentVioletContainer = Color(0xFF2E1065)
+
+val AccentCoral = Color(0xFFFF3366)
+val AccentCoralLight = Color(0xFFFB7185)
+val AccentCoralContainer = Color(0xFF4C0519)
+
+val MintEmerald = Color(0xFF10B981)
+val MintEmeraldLight = Color(0xFF34D399)
+val MintEmeraldContainer = Color(0xFF064E3B)
+
+val WarmAmber = Color(0xFFF59E0B)
+val WarmAmberContainer = Color(0xFF78350F)
+
+// Text Hierarchy
+val TextPrimary = Color(0xFFF9FAFB)
+val TextSecondary = Color(0xFF9CA3AF)
+val TextMuted = Color(0xFF6B7280)
+
+// Compatibility & Legacy Aliases
+val CyberBackgroundDark = ObsidianDark
+val CyberSurfaceDark = SurfaceDark
+val CyberSurfaceVariant = SurfaceDarkVariant
+val CyberSurfaceElevated = SurfaceDarkElevated
+val CyberBorder = BorderDark
+val CyberBorderGlow = PrimaryIndigo
+
+val NeonCyan = PrimaryIndigo
+val NeonCyanGlow = PrimaryIndigoGlow
+val NeonCyanContainer = PrimaryIndigoContainer
+
+val ElectricViolet = AccentViolet
+val ElectricVioletLight = AccentVioletLight
+val ElectricVioletContainer = AccentVioletContainer
+
+val NeonMagenta = AccentCoral
+val NeonMagentaLight = AccentCoralLight
+val NeonMagentaContainer = AccentCoralContainer
+
+val VividEmerald = MintEmerald
+val VividEmeraldLight = MintEmeraldLight
+val VividEmeraldContainer = MintEmeraldContainer
+
+val AmberWarning = WarmAmber
+val AmberWarningContainer = WarmAmberContainer
+
+val TextWhitePrimary = TextPrimary
+val TextGraySecondary = TextSecondary
+val TextGrayMuted = TextMuted
+
+val SlateDark950 = ObsidianDark
+val SlateDark900 = SurfaceDark
+val SlateDark850 = SurfaceDarkVariant
+val SlateDark800 = SurfaceDarkElevated
 val SlateDark700 = Color(0xFF334155)
-val SlateBorder = Color(0xFF283548)
+val SlateBorder = BorderDark
 
-// Accent Colors
-val EmeraldPrimary = Color(0xFF10B981)
-val EmeraldLight = Color(0xFF34D399)
-val EmeraldGlow = Color(0xFF059669)
-val EmeraldContainer = Color(0xFF064E3B)
+val EmeraldPrimary = MintEmerald
+val EmeraldLight = MintEmeraldLight
+val EmeraldGlow = MintEmerald
+val EmeraldContainer = MintEmeraldContainer
 
-val YouTubeRed = Color(0xFFFF334B)
-val YouTubeRedDark = Color(0xFFD32F2F)
-val YouTubeRedContainer = Color(0xFF4C0B12)
+val YouTubeRed = AccentCoral
+val YouTubeRedDark = Color(0xFFBE123C)
+val YouTubeRedContainer = AccentCoralContainer
 
-val ElectricBlue = Color(0xFF38BDF8)
-val ElectricBlueContainer = Color(0xFF075985)
+val ElectricBlue = PrimaryIndigo
+val ElectricBlueContainer = PrimaryIndigoContainer
 
-val AmberAlert = Color(0xFFF59E0B)
-val AmberContainer = Color(0xFF78350F)
+val AmberAlert = WarmAmber
+val AmberContainer = WarmAmberContainer
 
-// Text Colors
-val TextWhitePrimary = Color(0xFFF8FAFC)
-val TextGraySecondary = Color(0xFF94A3B8)
-val TextGrayMuted = Color(0xFF64748B)
-
-// Material 3 Compatible Standard Palette
-val Purple80 = Color(0xFF34D399)
-val PurpleGrey80 = Color(0xFF94A3B8)
-val Pink80 = Color(0xFFFF334B)
-
-val Purple40 = Color(0xFF10B981)
-val PurpleGrey40 = Color(0xFF334155)
-val Pink40 = Color(0xFFD32F2F)

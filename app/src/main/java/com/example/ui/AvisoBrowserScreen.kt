@@ -121,6 +121,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import android.widget.Toast
 import com.example.model.BrowserTab
+import com.example.ui.components.AppLogoBadge
 import com.example.util.AvisoNotificationHelper
 import com.example.util.AvisoTaskParser
 import com.example.viewmodel.AvisoViewModel
@@ -854,26 +855,13 @@ fun AvisoBrowserScreen(
                                     viewModel.navigateTo("https://aviso.bz/tasks-youtube")
                                 }
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(32.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(Color(0xFFFF0033)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.PlayCircle,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
+                            AppLogoBadge(size = 32.dp)
                             Spacer(modifier = Modifier.width(8.dp))
                             Column {
                                 Text(
                                     text = "Aviso Pro",
                                     style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.ExtraBold,
+                                    fontWeight = FontWeight.Black,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )

@@ -1,46 +1,81 @@
 <?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
 
-    <!-- Strictly within 66dp safe-zone (21dp to 87dp) -->
+    <!-- Strictly within 66dp safe-zone (21dp to 87dp, center = 54, 54) -->
 
-    <!-- Outer Rounded Hex Shield / Badge -->
+    <!-- Outer Faceted Shield Container -->
     <path
-        android:fillColor="#0F172A"
-        android:strokeColor="#1E293B"
-        android:strokeWidth="1.5"
-        android:pathData="M54,23 C68,23 83,29 83,44 L83,62 C83,75 69,84 54,87 C39,84 25,75 25,62 L25,44 C25,29 40,23 54,23 Z" />
+        android:strokeColor="#6366F1"
+        android:strokeWidth="1.8"
+        android:pathData="M54,23 L79,35 L79,69 L54,83 L29,69 L29,35 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="29"
+                android:startY="23"
+                android:endX="79"
+                android:endY="83"
+                android:type="linear">
+                <item android:color="#1E1B4B" android:offset="0.0" />
+                <item android:color="#111827" android:offset="0.6" />
+                <item android:color="#0B0F19" android:offset="1.0" />
+            </gradient>
+        </aapt:attr>
+    </path>
 
-    <!-- Emerald Tech Accent Ring / Inner Glow -->
+    <!-- Inner Violet Tech Ring -->
     <path
-        android:fillColor="#064E3B"
-        android:pathData="M54,27 C65,27 77,32 77,44 L77,61 C77,71 66,79 54,82 C42,79 31,71 31,61 L31,44 C31,32 43,27 54,27 Z" />
+        android:strokeColor="#8B5CF6"
+        android:strokeWidth="1.2"
+        android:fillColor="#00000000"
+        android:pathData="M54,28 L74,38 L74,66 L54,78 L34,66 L34,38 Z" />
 
-    <!-- Sleek YouTube Task Card Centerpiece -->
+    <!-- Centerpiece YouTube Rounded Play Card -->
     <path
-        android:fillColor="#E11D48"
-        android:pathData="M37,42 C37,39 39,37 42,37 L66,37 C69,37 71,39 71,42 L71,60 C71,63 69,65 66,65 L42,65 C39,65 37,63 37,60 Z" />
+        android:pathData="M38,41 C38,37.5 40.5,35 44,35 L64,35 C67.5,35 70,37.5 70,41 L70,61 C70,64.5 67.5,67 64,67 L44,67 C40.5,67 38,64.5 38,61 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="38"
+                android:startY="35"
+                android:endX="70"
+                android:endY="67"
+                android:type="linear">
+                <item android:color="#FF3366" android:offset="0.0" />
+                <item android:color="#E11D48" android:offset="0.5" />
+                <item android:color="#7C3AED" android:offset="1.0" />
+            </gradient>
+        </aapt:attr>
+    </path>
 
-    <!-- Bold Play Button (White Triangle) -->
+    <!-- Crisp White Play Triangle Symbol -->
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M51,45.5 L60,51 L51,56.5 Z" />
+        android:pathData="M51,45 L61,51 L51,57 Z" />
 
-    <!-- Automation Gear / Speed Lightning Accent on Top Right -->
+    <!-- Smart Mint Emerald Task Spark Node (Top-Right) -->
     <path
         android:fillColor="#10B981"
-        android:pathData="M66,28 L74,28 L69,35 L75,35 L64,45 L67,37 L62,37 Z" />
-
-    <!-- Smart Auto Task Indicator Orbit (Bottom Left) -->
+        android:pathData="M72,32 A4,4 0 1,1 72,31.99 Z" />
     <path
-        android:fillColor="#38BDF8"
-        android:pathData="M34,68 A3.5,3.5 0 1,1 34,67.99 Z" />
+        android:fillColor="#FFFFFF"
+        android:pathData="M72,32 A1.5,1.5 0 1,1 72,31.99 Z" />
+
+    <!-- Smart Glowing Orbit Nodes -->
+    <path
+        android:fillColor="#818CF8"
+        android:pathData="M31,34 A2.5,2.5 0 1,1 31,33.99 Z" />
 
     <path
-        android:fillColor="#10B981"
-        android:pathData="M43,72 A2.5,2.5 0 1,1 43,71.99 Z" />
+        android:fillColor="#34D399"
+        android:pathData="M77,70 A2.5,2.5 0 1,1 77,69.99 Z" />
+
+    <path
+        android:fillColor="#A78BFA"
+        android:pathData="M31,70 A2.5,2.5 0 1,1 31,69.99 Z" />
 
 </vector>
+
