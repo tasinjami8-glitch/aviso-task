@@ -1485,13 +1485,14 @@ fun AvisoBrowserScreen(
                                     tempWebView.webViewClient = object : WebViewClient() {
                                         private fun handleNewWindow(targetUrl: String, v: WebView?) {
                                             if (targetUrl.isNotEmpty() && targetUrl != "about:blank") {
-                                                mainWv.post {
+                                                 mainWv.post {
                                                     val isVideoLink = targetUrl.contains("youtube.com") ||
                                                             targetUrl.contains("youtu.be") ||
-                                                            targetUrl.contains("/vl/") ||
-                                                            targetUrl.contains("/go/") ||
+                                                            targetUrl.contains("/vl") ||
+                                                            targetUrl.contains("/go") ||
                                                             targetUrl.contains("create_session") ||
-                                                            targetUrl.contains("youtube.php")
+                                                            targetUrl.contains("youtube.php") ||
+                                                            targetUrl.contains("view_youtube")
                                                     if (isVideoLink) {
                                                         if (uiState.openInExternalYouTubeApp && (targetUrl.contains("youtube.com") || targetUrl.contains("youtu.be"))) {
                                                             launchYouTubeApp(ctx, targetUrl)
@@ -1552,13 +1553,14 @@ fun AvisoBrowserScreen(
                                         return true
                                     }
 
-                                    // Intercept video tasks (/vl/, /go/, youtube, create_session) and open in Tab 2
+                                    // Intercept video tasks (/vl, /go, youtube, create_session) and open in Tab 2
                                     val isVideoLink = url.contains("youtube.com") ||
                                             url.contains("youtu.be") ||
-                                            url.contains("/vl/") ||
-                                            url.contains("/go/") ||
+                                            url.contains("/vl") ||
+                                            url.contains("/go") ||
                                             url.contains("create_session") ||
-                                            url.contains("youtube.php")
+                                            url.contains("youtube.php") ||
+                                            url.contains("view_youtube")
 
                                     if (isVideoLink) {
                                         if (uiState.openInExternalYouTubeApp && (url.contains("youtube.com") || url.contains("youtu.be"))) {

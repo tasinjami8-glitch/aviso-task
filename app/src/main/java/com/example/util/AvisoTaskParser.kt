@@ -374,13 +374,17 @@ object AvisoTaskParser {
                 function isProtectedForbiddenElement(el) {
                     if (!el) return false;
 
-                    // NEVER block login, authentication, registration, captcha, or form inputs
+                    // NEVER block video player pages, YouTube, task viewing, login, or auth
                     var pageUrl = (window.location.href || '').toLowerCase();
-                    if (pageUrl.indexOf('/login') !== -1 || pageUrl.indexOf('/auth') !== -1 || pageUrl.indexOf('/register') !== -1) {
+                    if (pageUrl.indexOf('youtube.com') !== -1 || pageUrl.indexOf('youtu.be') !== -1 ||
+                        pageUrl.indexOf('/vl') !== -1 || pageUrl.indexOf('/go') !== -1 ||
+                        pageUrl.indexOf('create_session') !== -1 || pageUrl.indexOf('youtube.php') !== -1 ||
+                        pageUrl.indexOf('/login') !== -1 || pageUrl.indexOf('/auth') !== -1 || pageUrl.indexOf('/register') !== -1) {
                         return false;
                     }
 
                     var initialTag = (el.tagName || '').toLowerCase();
+                    if (initialTag === 'video' || initialTag === 'iframe') return false;
                     if (initialTag === 'input' || initialTag === 'textarea' || initialTag === 'select' || initialTag === 'label' || initialTag === 'form') {
                         return false;
                     }
@@ -388,7 +392,29 @@ object AvisoTaskParser {
                     var initialHref = (el.getAttribute ? (el.getAttribute('href') || '') : '').toLowerCase();
                     var initialId = (el.id || '').toLowerCase();
                     var initialCls = (typeof el.className === 'string' ? el.className : '').toLowerCase();
-                    var initialText = (el.innerText || el.textContent || '').trim().toLowerCase();
+                    var initialText = (el.innerText || el.textContent || el.value || '').trim().toLowerCase();
+
+                    // Whitelist all task actions, video viewing, start watching, and confirm view buttons
+                    if (initialText.indexOf('приступить') !== -1 || initialText.indexOf('начать') !== -1 ||
+                        initialText.indexOf('start') !== -1 || initialText.indexOf('просмотр') !== -1 ||
+                        initialText.indexOf('подтвердить') !== -1 || initialText.indexOf('confirm') !== -1 ||
+                        initialText.indexOf('забрать') !== -1 || initialText.indexOf('проверить') !== -1 ||
+                        initialText.indexOf('play') !== -1 || initialText.indexOf('воспроизвести') !== -1) {
+                        return false;
+                    }
+
+                    if (initialCls.indexOf('play') !== -1 || initialCls.indexOf('start') !== -1 ||
+                        initialCls.indexOf('video') !== -1 || initialCls.indexOf('serf') !== -1 ||
+                        initialCls.indexOf('task') !== -1 || initialCls.indexOf('title') !== -1 ||
+                        initialId.indexOf('video') !== -1 || initialId.indexOf('play') !== -1 ||
+                        initialId.indexOf('start') !== -1 || initialId.indexOf('adv_') !== -1 || initialId.indexOf('task_') !== -1) {
+                        return false;
+                    }
+
+                    if (initialHref.indexOf('/vl') !== -1 || initialHref.indexOf('/go') !== -1 || initialHref.indexOf('create_session') !== -1 ||
+                        initialHref.indexOf('youtube') !== -1 || initialHref.indexOf('youtu.be') !== -1 || initialHref.indexOf('/adv/') !== -1) {
+                        return false;
+                    }
 
                     if (initialHref.indexOf('/login') !== -1 || initialHref.indexOf('/auth') !== -1 || initialHref.indexOf('/signin') !== -1 || initialHref.indexOf('/register') !== -1) {
                         return false;
@@ -397,9 +423,6 @@ object AvisoTaskParser {
                         return false;
                     }
                     if (initialCls.indexOf('login') !== -1 || initialCls.indexOf('auth') !== -1 || initialCls.indexOf('captcha') !== -1 || initialCls.indexOf('turnstile') !== -1 || initialCls.indexOf('recaptcha') !== -1) {
-                        return false;
-                    }
-                    if (initialText === 'вход' || initialText === 'войти' || initialText.indexOf('войти') === 0 || initialText === 'login' || initialText === 'sign in' || initialText === 'авторизация') {
                         return false;
                     }
 
@@ -413,14 +436,15 @@ object AvisoTaskParser {
                         var oc = (node.getAttribute ? (node.getAttribute('onclick') || '') : '').toLowerCase();
                         var text = (node.innerText || node.textContent || '').trim().toLowerCase();
 
+                        // If element is inside a task row or task container, it is part of the task!
+                        if (id.indexOf('adv_') !== -1 || id.indexOf('task_') !== -1 || cls.indexOf('work-serf') !== -1 || cls.indexOf('table-task') !== -1) {
+                            // Only block advertiser profile links inside the task row
+                            if (href.indexOf('/user/') !== -1 || href.indexOf('/profile') !== -1) return true;
+                            return false;
+                        }
+
                         // Whitelist login containers, forms, or authentication sections
                         if (href.indexOf('/login') !== -1 || href.indexOf('/auth') !== -1 || href.indexOf('/signin') !== -1 || href.indexOf('/register') !== -1) {
-                            return false;
-                        }
-                        if (id.indexOf('login') !== -1 || id.indexOf('auth') !== -1 || id.indexOf('captcha') !== -1 || id.indexOf('turnstile') !== -1) {
-                            return false;
-                        }
-                        if (cls.indexOf('login') !== -1 || cls.indexOf('auth') !== -1 || cls.indexOf('captcha') !== -1 || cls.indexOf('turnstile') !== -1) {
                             return false;
                         }
 
@@ -440,12 +464,12 @@ object AvisoTaskParser {
                             }
                         }
 
-                        // 2. Prohibited URL links & actions (financial, advertising account, profile, wallet, deposit, withdraw, etc.)
+                        // 2. Prohibited URL links & actions (financial, advertising campaign manager, profile, wallet, deposit, withdraw, etc.)
                         if (href) {
                             if (href.indexOf('/pay') !== -1 || href.indexOf('/bill') !== -1 || href.indexOf('/wallet') !== -1 ||
                                 href.indexOf('/money') !== -1 || href.indexOf('/cash') !== -1 || href.indexOf('/finance') !== -1 ||
                                 href.indexOf('/profile') !== -1 || href.indexOf('/user/') !== -1 || href.indexOf('/wm/') !== -1 ||
-                                href.indexOf('/adv/') !== -1 || href.indexOf('/advert') !== -1 || href.indexOf('/settings') !== -1 ||
+                                href.indexOf('/advertiser/') !== -1 || href.indexOf('/cabinet_adv') !== -1 || href.indexOf('/settings') !== -1 ||
                                 href.indexOf('/payout') !== -1 || href.indexOf('/deposit') !== -1 || href.indexOf('/popolnit') !== -1 ||
                                 href.indexOf('/balance') !== -1 || href.indexOf('/ref') !== -1 || href.indexOf('/mail') !== -1 ||
                                 href.indexOf('/msg') !== -1 || href.indexOf('/cabinet') !== -1) {
@@ -462,16 +486,16 @@ object AvisoTaskParser {
 
                         // 3. Prohibited text / labels for auto-bot
                         var forbiddenWords = [
-                            'баланс', 'основной счет', 'рекламный счет', 'рекламный', 'пополнить', 'вывести', 'вывод', 'пополнение',
-                            'кошелек', 'профиль', 'личный кабинет', 'мои данные', 'рекламодатель',
-                            'заказать рекламу', 'управление рекламой', 'сообщения', 'почта', 'новости', 'рефералы', 'бонус',
-                            'advertising account', 'advertising', 'balance', 'wallet', 'deposit', 'withdrawal', 'withdraw',
-                            'payout', 'profile', 'my account', 'messages', 'referrals',
-                            'ব্যালেন্স', 'অ্যাকাউন্ট', 'ওয়ালেট', 'উইথড্র', 'ডিপোজিট', 'প্রোফাইল'
+                            'баланс', 'основной счет', 'рекламный счет', 'пополнить', 'вывести', 'вывод', 'пополнение',
+                            'кошелек', 'личный кабинет', 'мои данные',
+                            'заказать рекламу', 'управление рекламой', 'сообщения', 'почта', 'новости', 'рефералы',
+                            'advertising account', 'balance', 'wallet', 'deposit', 'withdrawal', 'withdraw',
+                            'payout', 'my account', 'messages', 'referrals',
+                            'ব্যালেন্স', 'অ্যাকাউন্ট', 'ওয়ালেট', 'উইথড্র', 'ডিপোজিট'
                         ];
                         for (var fw = 0; fw < forbiddenWords.length; fw++) {
                             var word = forbiddenWords[fw];
-                            if (text === word || text.indexOf(word) === 0 || (text.length < 35 && text.indexOf(word) !== -1)) {
+                            if (text === word || text.indexOf(word) === 0 || (text.length < 30 && text.indexOf(word) !== -1)) {
                                 return true;
                             }
                         }
@@ -668,14 +692,14 @@ object AvisoTaskParser {
                     
                     try {
                         var rect = el.getBoundingClientRect();
-                        var cx = rect.left + rect.width / 2;
-                        var cy = rect.top + rect.height / 2;
-                        var mdown = new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy });
-                        var mup = new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy });
-                        var mclick = new MouseEvent('click', { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy });
-                        el.dispatchEvent(mdown);
-                        el.dispatchEvent(mup);
-                        el.dispatchEvent(mclick);
+                        var cx = (rect.left + rect.width / 2) || 100;
+                        var cy = (rect.top + rect.height / 2) || 100;
+                        var opts = { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy };
+                        try { el.dispatchEvent(new PointerEvent('pointerdown', opts)); } catch(pe) {}
+                        el.dispatchEvent(new MouseEvent('mousedown', opts));
+                        try { el.dispatchEvent(new PointerEvent('pointerup', opts)); } catch(pe) {}
+                        el.dispatchEvent(new MouseEvent('mouseup', opts));
+                        el.dispatchEvent(new MouseEvent('click', opts));
                     } catch(e) {}
 
                     try { el.click(); } catch(e) {}
@@ -691,7 +715,7 @@ object AvisoTaskParser {
                     }
 
                     if (href && href !== '#' && href.indexOf('javascript:') === -1 &&
-                        (href.indexOf('/vl') !== -1 || href.indexOf('/go/') !== -1 || href.indexOf('create_session') !== -1 || href.indexOf('youtube') !== -1 || href.indexOf('youtu.be') !== -1)) {
+                        (href.indexOf('/vl') !== -1 || href.indexOf('/go') !== -1 || href.indexOf('create_session') !== -1 || href.indexOf('youtube') !== -1 || href.indexOf('youtu.be') !== -1)) {
                         if (window.AvisoBridge && window.AvisoBridge.openNewTab) {
                             window.AvisoBridge.openNewTab(href, dur);
                         } else {
@@ -703,7 +727,6 @@ object AvisoTaskParser {
 
                 function isStartWatchingBtn(el) {
                     if (!el || el.offsetParent === null) return false;
-                    if (isProtectedForbiddenElement(el)) return false;
                     var t = (el.innerText || el.value || '').toLowerCase().trim();
                     var cls = (el.className || '').toString().toLowerCase();
                     var oc = (el.getAttribute('onclick') || '').toLowerCase();
@@ -725,7 +748,7 @@ object AvisoTaskParser {
 
                     if (cls.indexOf('btn_play') !== -1 || cls.indexOf('btn-play') !== -1 || cls.indexOf('btn_youtube') !== -1 ||
                         oc.indexOf('start_youtube') !== -1 || oc.indexOf('func_start') !== -1 ||
-                        href.indexOf('create_session') !== -1 || href.indexOf('/vl/') !== -1) {
+                        href.indexOf('create_session') !== -1 || href.indexOf('/vl') !== -1 || href.indexOf('/go') !== -1) {
                         return true;
                     }
 
@@ -1046,7 +1069,6 @@ object AvisoTaskParser {
 
                 function isStartBtn(el) {
                     if (!isVisible(el)) return false;
-                    if (window._isProtectedForbiddenElement && window._isProtectedForbiddenElement(el)) return false;
                     var t = (el.innerText || el.textContent || el.value || el.getAttribute('aria-label') || '').trim().toLowerCase();
                     var cls = (el.className || '').toString().toLowerCase();
                     var id = (el.id || '').toLowerCase();
@@ -1056,7 +1078,7 @@ object AvisoTaskParser {
                         return false;
                     }
 
-                    // Direct "Start" button checks
+                    // Direct "Start" / "Play" button checks
                     if (t === 'start' ||
                         t === 'start watching' ||
                         t === 'start view' ||
@@ -1066,12 +1088,17 @@ object AvisoTaskParser {
                         t === 'приступить к просмотру' ||
                         t.indexOf('start watching') !== -1 ||
                         t.indexOf('начать просмотр') !== -1 ||
-                        t.indexOf('приступить к просмотру') !== -1) {
+                        t.indexOf('приступить к просмотру') !== -1 ||
+                        t.indexOf('play') !== -1 ||
+                        t.indexOf('воспроизвести') !== -1) {
                         return true;
                     }
 
                     // Video play / start overlays
-                    if (id === 'start_video' || id === 'video-click' || cls.indexOf('btn_play') !== -1 || cls.indexOf('btn-play') !== -1 || cls.indexOf('ytp-large-play-button') !== -1) {
+                    if (id === 'start_video' || id === 'video-click' || id.indexOf('player') !== -1 ||
+                        cls.indexOf('btn_play') !== -1 || cls.indexOf('btn-play') !== -1 ||
+                        cls.indexOf('ytp-large-play-button') !== -1 || cls.indexOf('ytp-play-button') !== -1 ||
+                        cls.indexOf('video-stream') !== -1) {
                         return true;
                     }
 
@@ -1087,19 +1114,32 @@ object AvisoTaskParser {
                     }
                 } catch(e) {}
 
+                // Trigger YouTube iframes play
+                try {
+                    var ifrs = document.querySelectorAll('iframe[src*="youtube"], iframe[src*="youtu.be"], iframe');
+                    for (var ifrI = 0; ifrI < ifrs.length; ifrI++) {
+                        try {
+                            ifrs[ifrI].contentWindow.postMessage('{"event":"command","func":"playVideo","args":""}', '*');
+                            ifrs[ifrI].contentWindow.postMessage('{"event":"command","func":"unMute","args":""}', '*');
+                        } catch(pe) {}
+                    }
+                } catch(e) {}
+
                 var clicked = false;
                 for (var d = 0; d < docs.length; d++) {
-                    var candidates = docs[d].querySelectorAll('button, a, input[type="button"], div[role="button"], span[role="button"], .btn, [class*="play"], [class*="start"]');
+                    var candidates = docs[d].querySelectorAll('button, a, input[type="button"], div[role="button"], span[role="button"], video, .btn, [class*="play"], [class*="start"], #video-click, .ytp-large-play-button, .ytp-play-button');
                     for (var i = 0; i < candidates.length; i++) {
                         if (isStartBtn(candidates[i])) {
                             try { candidates[i].scrollIntoView({ behavior: 'instant', block: 'center' }); } catch(e) {}
                             try { candidates[i].focus(); } catch(e) {}
                             try {
                                 var rect = candidates[i].getBoundingClientRect();
-                                var cx = rect.left + rect.width / 2;
-                                var cy = rect.top + rect.height / 2;
+                                var cx = (rect.left + rect.width / 2) || 100;
+                                var cy = (rect.top + rect.height / 2) || 100;
                                 var opts = { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy };
+                                try { candidates[i].dispatchEvent(new PointerEvent('pointerdown', opts)); } catch(pe) {}
                                 candidates[i].dispatchEvent(new MouseEvent('mousedown', opts));
+                                try { candidates[i].dispatchEvent(new PointerEvent('pointerup', opts)); } catch(pe) {}
                                 candidates[i].dispatchEvent(new MouseEvent('mouseup', opts));
                                 candidates[i].dispatchEvent(new MouseEvent('click', opts));
                             } catch(e) {}
